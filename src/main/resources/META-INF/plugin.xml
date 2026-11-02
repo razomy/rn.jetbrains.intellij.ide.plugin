@@ -1,36 +1,110 @@
-<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
-    <id>org.razomy.rn</id>
+    <id>org.razomy.rn.intellij.plugin</id>
+    <name>Razomy Notation (.rn)</name>
+    <vendor url="https://razomy.org">Razomy</vendor>
 
-    <!-- Public plugin name should be written in Title Case.
-     Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
-    <name>Rn</name>
-
-    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
-
-    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
-         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
-        ]]></description>
+        Full language support for <b>Razomy Notation (<code>.rn</code>)</b> v0.1.0 — Layer 0 Universal Stream Root,
+        Symmetric Triad (<code>[]</code> Stream, <code>{}</code> Form, <code>()</code> Tuple),
+        Schema Portals (<code>Sql</code>, <code>Html</code>, <code>Scss</code>, <code>Md</code>),
+        Column-0 Multiline Raw Strings, Algebraic Composition (<code>&amp;</code>, <code>^</code>, <code>/</code>),
+        and one-click multi-format file exporting (JSON, YAML, Markdown, HTML, SQL, SCSS, Terraform/Docker, Protobuf, Mermaid, CSV).
+    ]]></description>
 
-    <!-- Product and plugin compatibility requirements.
-         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
-    <depends>com.intellij.modules.lsp</depends>
+    <depends>com.intellij.modules.platform</depends>
 
     <resource-bundle>messages.MyMessageBundle</resource-bundle>
 
-    <!-- Extensions defined by the plugin.
-         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
-        <!-- If the plugin is published on JetBrains Marketplace, errors reported by users are available on the plugin page.
-             See https://plugins.jetbrains.com/docs/marketplace/error-handler.html#developers-side for details. -->
-        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
-        <toolWindow id="MyToolWindow" factoryClass="org.razomy.MyToolWindowFactory"
-                    icon="AllIcons.Toolwindows.ToolWindowPalette"/>
+        <!-- File Type Registration (.rn and .rl) -->
+        <fileType
+            name="Razomy Notation"
+            implementationClass="org.razomy.rn.intellij.plugin.RnFileType"
+            fieldName="INSTANCE"
+            language="RazomyNotation"
+            extensions="rn;rl"/>
+
+        <!-- Parser & AST -->
+        <lang.parserDefinition
+            language="RazomyNotation"
+            implementationClass="org.razomy.rn.intellij.plugin.RnParserDefinition"/>
+
+        <!-- Syntax Highlighting & Color Settings -->
+        <lang.syntaxHighlighterFactory
+            language="RazomyNotation"
+            implementationClass="org.razomy.rn.intellij.plugin.RnSyntaxHighlighterFactory"/>
+        <colorSettingsPage
+            implementation="org.razomy.rn.intellij.plugin.RnColorSettingsPage"/>
+
+        <!-- Language Injection for Embedded Code Blocks (json", ts", sql", html", md", rn2", etc.) -->
+        <multiHostInjector
+            implementation="org.razomy.rn.intellij.plugin.RnLanguageInjector"/>
+
+        <!-- Code Folding & Commenter (# ) -->
+        <lang.foldingBuilder
+            language="RazomyNotation"
+            implementationClass="org.razomy.rn.intellij.plugin.RnFoldingBuilder"/>
+        <lang.commenter
+            language="RazomyNotation"
+            implementationClass="org.razomy.rn.intellij.plugin.RnCommenter"/>
+
+        <!-- ToolWindow with Export Buttons & Live Preview -->
+        <toolWindow
+            id="MyToolWindow"
+            anchor="right"
+            icon="/META-INF/pluginIcon.svg"
+            factoryClass="org.razomy.rn.intellij.plugin.MyToolWindowFactory"/>
+
+        <!-- Notifications -->
+        <notificationGroup
+            id="RazomyNotation.Notifications"
+            displayType="BALLOON"/>
     </extensions>
 
+    <actions>
+        <group id="RazomyNotation.ExportActionGroup"
+               text="Export Razomy Notation (.rn)"
+               description="Export .rn file to JSON, YAML, Markdown, HTML, SQL, SCSS, Terraform, Protobuf, Mermaid, or CSV"
+               popup="true"
+               icon="/META-INF/pluginIcon.svg">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="CutCopyPasteGroup"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+            <action id="RazomyNotation.ExportJson"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToJsonAction"
+                    text="Export to JSON (.json)"/>
+            <action id="RazomyNotation.ExportYaml"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToYamlAction"
+                    text="Export to YAML (.yaml)"/>
+            <action id="RazomyNotation.ExportMarkdown"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToMarkdownAction"
+                    text="Export to Markdown (.md)"/>
+            <action id="RazomyNotation.ExportHtml"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToHtmlAction"
+                    text="Export to HTML (.html)"/>
+            <action id="RazomyNotation.ExportSql"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToSqlAction"
+                    text="Export to SQL (.sql)"/>
+            <action id="RazomyNotation.ExportScss"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToScssAction"
+                    text="Export to SCSS (.scss)"/>
+            <action id="RazomyNotation.ExportTerraform"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToTerraformAction"
+                    text="Export to Docker &amp; Terraform (.tf)"/>
+            <action id="RazomyNotation.ExportProto"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToProtoAction"
+                    text="Export to Protobuf (.proto)"/>
+            <action id="RazomyNotation.ExportMermaid"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToMermaidAction"
+                    text="Export to Mermaid (.mmd)"/>
+            <action id="RazomyNotation.ExportCsv"
+                    class="org.razomy.rn.intellij.plugin.ExportRnToCsvAction"
+                    text="Export to CSV (.csv)"/>
+            <separator/>
+            <action id="RazomyNotation.FormatRn"
+                    class="org.razomy.rn.intellij.plugin.FormatRnCanonicalAction"
+                    text="Format Canonical .rn (1-Space)"/>
+        </group>
+    </actions>
 </idea-plugin>
