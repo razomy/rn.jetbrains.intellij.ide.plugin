@@ -1,16 +1,28 @@
 <idea-plugin>
     <id>org.razomy.rn</id>
     <name>Razomy Notation (.rn)</name>
-    <vendor url="https://razomy.org">Razomy</vendor>
+    <vendor url="https://www.razomy.org">Razomy</vendor>
 
     <description><![CDATA[
         Full language support for <b>Razomy Notation (<code>.rn</code>)</b> v0.3.0 — Layer 0 Universal Node &amp; Schema Notation:
         Symmetric Pentad (<code>[]</code> Stream, <code>{}</code> Form, <code>()</code> Tuple, <code>""</code> Scalar/Col-0 String, <code>#</code> Comment),
         Attached Props &amp; Slots (<code>Key{Props}(Slots)</code>), Attached Type Constructors (<code>Sql(</code>, <code>Html[</code>, <code>Scss{</code>, <code>Date"..."</code>),
-        Schema Type Definitions (<code>Uuid{'pk}</code>, <code>Int(18, 120)</code>, <code>Str?</code>),
+        Schema Type Definitions (<code>Uuid{'pk}</code>, <code>Int(18, 120)</code>, <code>Str</code>),
         Column-0 Multiline Raw Strings, Algebraic Composition (<code>&amp;</code>, <code>^</code>, <code>/</code>),
         2D Table Formatter, Visual Auto-Numbering Inlay Hints, and multi-format file exporting.
     ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>0.3.0</h3>
+        <ul>
+            <li>Full Razomy Notation (<code>.rn</code>) and Razomy Language (<code>.rl</code>) v0.3.0 lexer, parser, and customizable syntax highlighting.</li>
+            <li>Multi-host language injection for Column-0 multiline raw strings (<code>Json"</code>, <code>Ts"</code>, <code>Sql"</code>, <code>Html"</code>, <code>Scss"</code>, <code>Sh"</code>, <code>Md"</code>, <code>Rn2"</code>, etc.).</li>
+            <li>2D Relational Table visual column formatter via standard IDE Reformat Code (<code>Ctrl+Alt+L</code> / <code>Cmd+Option+L</code>).</li>
+            <li>Visual auto-numbering inlay hints for Markdown headings (<code>part</code>, <code>section</code>, <code>topic</code>), ordered lists (<code>ol [</code>), and 2D tables.</li>
+            <li>Topological code folding and line commenter (<code># </code>) support.</li>
+            <li>Multi-format exporter actions and live preview Tool Window (JSON, YAML, Markdown, HTML, SQL, SCSS, Terraform, Protobuf, Mermaid, CSV, and canonical <code>.rn</code>).</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
 

@@ -274,7 +274,7 @@ class RnLexer : LexerBase() {
             isNumberLiteral(word) -> RnTypes.NUMBER
             // v0.3.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Int(1, 10){label "x"}`)
             isPascalCase(word) && isDirectlyFollowedByPentad(tokenEnd) -> RnTypes.SCHEMA_PORTAL
-            // v0.3.0 Schema Type Definition (`Uuid{'pk}`, `Str?`, `Int(18, 120){default 18}`, `Uuid`)
+            // v0.3.0 Schema Type Definition (`Uuid{'pk}`, `Str`, `Int(18, 120){default 18}`, `Uuid`)
             isPascalCase(word) -> RnTypes.SCHEMA_TYPE
             isKeyTokenPosition(tokenStart, tokenEnd) -> RnTypes.KEY
             else -> RnTypes.TEXT
@@ -1040,7 +1040,7 @@ class RnColorSettingsPage : ColorSettingsPage {
         AttributesDescriptor("Comment (# )", RnSyntaxHighlighter.COMMENT),
         AttributesDescriptor("Key / Tag Name", RnSyntaxHighlighter.KEY),
         AttributesDescriptor("Attached Type Constructor (Sql(, Html[, Scss{)", RnSyntaxHighlighter.SCHEMA_PORTAL),
-        AttributesDescriptor("Schema Type Definition (Uuid, Int, Str?)", RnSyntaxHighlighter.SCHEMA_TYPE),
+        AttributesDescriptor("Schema Type Definition (Uuid, Int, Str)", RnSyntaxHighlighter.SCHEMA_TYPE),
         AttributesDescriptor("Symbol ('pk, 'GET)", RnSyntaxHighlighter.SYMBOL),
         AttributesDescriptor("Typed Literal (Date\"...\")", RnSyntaxHighlighter.TYPED_LITERAL),
         AttributesDescriptor("String", RnSyntaxHighlighter.STRING),
@@ -1061,7 +1061,7 @@ class RnColorSettingsPage : ColorSettingsPage {
         User{table "users"}(1, 2) & Auditable / debug {
          id Uuid{'pk}
          age Int(18, 120){default 18}
-         bio Str?
+         bio Str
          created_at Date"2026-03-30"
          fallback None
          welcome_msg Ts1"
