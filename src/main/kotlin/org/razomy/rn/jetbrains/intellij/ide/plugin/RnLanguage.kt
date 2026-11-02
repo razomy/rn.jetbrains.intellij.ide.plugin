@@ -5,7 +5,7 @@ import com.intellij.openapi.fileTypes.LanguageFileType
 import com.intellij.openapi.util.IconLoader
 import javax.swing.Icon
 
-object RnLanguage : Language("RazomyNotation") {
+object RnLanguage : Language("RN") {
     private fun readResolve(): Any = RnLanguage
     override fun getDisplayName(): String = "Razomy Notation (.rn)"
 }

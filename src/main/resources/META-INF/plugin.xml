@@ -21,17 +21,17 @@
             name="Razomy Notation"
             implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFileType"
             fieldName="INSTANCE"
-            language="RazomyNotation"
+            language="RN"
             extensions="rn;rl"/>
 
         <!-- Parser & AST -->
         <lang.parserDefinition
-            language="RazomyNotation"
+            language="RN"
             implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnParserDefinition"/>
 
         <!-- Syntax Highlighting & Color Settings -->
         <lang.syntaxHighlighterFactory
-            language="RazomyNotation"
+            language="RN"
             implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnSyntaxHighlighterFactory"/>
         <colorSettingsPage
             implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnColorSettingsPage"/>
@@ -42,10 +42,11 @@
 
         <!-- Code Folding & Commenter (# ) -->
         <lang.foldingBuilder
-            language="RazomyNotation"
+            language="RN"
             implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFoldingBuilder"/>
+
         <lang.commenter
-            language="RazomyNotation"
+            language="RN"
             implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnCommenter"/>
 
         <!-- ToolWindow with Export Buttons & Live Preview -->
@@ -57,12 +58,18 @@
 
         <!-- Notifications -->
         <notificationGroup
-            id="RazomyNotation.Notifications"
+            id="RN.Notifications"
             displayType="BALLOON"/>
+
+        <formattingService implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFormattingService"/>
+
+        <codeInsight.inlayProvider
+                language="RN"
+                implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnVisualNumberingHintsProvider"/>
     </extensions>
 
     <actions>
-        <group id="RazomyNotation.ExportActionGroup"
+        <group id="RN.ExportActionGroup"
                text="Export Razomy Notation (.rn)"
                description="Export .rn file to JSON, YAML, Markdown, HTML, SQL, SCSS, Terraform, Protobuf, Mermaid, or CSV"
                popup="true"
@@ -71,38 +78,38 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="CutCopyPasteGroup"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>
 
-            <action id="RazomyNotation.ExportJson"
+            <action id="RN.ExportJson"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToJsonAction"
                     text="Export to JSON (.json)"/>
-            <action id="RazomyNotation.ExportYaml"
+            <action id="RN.ExportYaml"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToYamlAction"
                     text="Export to YAML (.yaml)"/>
-            <action id="RazomyNotation.ExportMarkdown"
+            <action id="RN.ExportMarkdown"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToMarkdownAction"
                     text="Export to Markdown (.md)"/>
-            <action id="RazomyNotation.ExportHtml"
+            <action id="RN.ExportHtml"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToHtmlAction"
                     text="Export to HTML (.html)"/>
-            <action id="RazomyNotation.ExportSql"
+            <action id="RN.ExportSql"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToSqlAction"
                     text="Export to SQL (.sql)"/>
-            <action id="RazomyNotation.ExportScss"
+            <action id="RN.ExportScss"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToScssAction"
                     text="Export to SCSS (.scss)"/>
-            <action id="RazomyNotation.ExportTerraform"
+            <action id="RN.ExportTerraform"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToTerraformAction"
                     text="Export to Docker &amp; Terraform (.tf)"/>
-            <action id="RazomyNotation.ExportProto"
+            <action id="RN.ExportProto"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToProtoAction"
                     text="Export to Protobuf (.proto)"/>
-            <action id="RazomyNotation.ExportMermaid"
+            <action id="RN.ExportMermaid"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToMermaidAction"
                     text="Export to Mermaid (.mmd)"/>
-            <action id="RazomyNotation.ExportCsv"
+            <action id="RN.ExportCsv"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToCsvAction"
                     text="Export to CSV (.csv)"/>
             <separator/>
-            <action id="RazomyNotation.FormatRn"
+            <action id="RN.FormatRn"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.FormatRnCanonicalAction"
                     text="Format Canonical .rn (1-Space)"/>
         </group>

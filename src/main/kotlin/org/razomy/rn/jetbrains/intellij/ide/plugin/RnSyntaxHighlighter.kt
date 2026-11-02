@@ -1,5 +1,16 @@
 package org.razomy.rn.jetbrains.intellij.ide.plugin
 
+import com.intellij.codeInsight.hints.*
+import com.intellij.codeInsight.hints.presentation.InlayPresentation
+import com.intellij.codeInsight.hints.presentation.PresentationFactory
+import com.intellij.openapi.editor.Editor
+import javax.swing.JComponent
+import javax.swing.JPanel
+import com.intellij.extapi.psi.ASTWrapperPsiElement
+import com.intellij.extapi.psi.PsiFileBase
+import com.intellij.formatting.service.AsyncDocumentFormattingService
+import com.intellij.formatting.service.AsyncFormattingRequest
+import com.intellij.formatting.service.FormattingService
 import com.intellij.lang.ASTNode
 import com.intellij.lang.Commenter
 import com.intellij.lang.Language
@@ -10,13 +21,13 @@ import com.intellij.lang.folding.FoldingDescriptor
 import com.intellij.lang.injection.MultiHostInjector
 import com.intellij.lang.injection.MultiHostRegistrar
 import com.intellij.lexer.LexerBase
-import com.intellij.openapi.fileTypes.FileTypeManager
-import com.intellij.openapi.fileTypes.LanguageFileType
 import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.HighlighterColors
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.colors.TextAttributesKey.createTextAttributesKey
+import com.intellij.openapi.fileTypes.FileTypeManager
+import com.intellij.openapi.fileTypes.LanguageFileType
 import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterBase
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
@@ -25,6 +36,7 @@ import com.intellij.openapi.options.colors.ColorDescriptor
 import com.intellij.openapi.options.colors.ColorSettingsPage
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.FileViewProvider
 import com.intellij.psi.LiteralTextEscaper
 import com.intellij.psi.PsiElement
@@ -35,9 +47,7 @@ import com.intellij.psi.impl.source.tree.LeafPsiElement
 import com.intellij.psi.tree.IElementType
 import com.intellij.psi.tree.IFileElementType
 import com.intellij.psi.tree.TokenSet
-import com.intellij.extapi.psi.ASTWrapperPsiElement
-import com.intellij.extapi.psi.PsiFileBase
-import com.intellij.openapi.vfs.VirtualFile
+import java.util.EnumSet
 import javax.swing.Icon
 
 class RnTokenType(debugName: String) : IElementType(debugName, RnLanguage)
@@ -64,10 +74,12 @@ object RnTypes {
 }
 
 /**
- * Context-aware Lexer for Razomy Notation (.rn) v0.1.0:
- * Recognizes Homoiconic Comments (`# `), Column-0 Raw Strings (`(tag)?(N)?"` ... `"(N)?`),
- * Symbols (`'pk`), Typed Literals (`Date"..."`), Schema Portals (`Sql`, `Html`, `Scss`, `Md`),
- * Algebraic Operators (`&`, `^`, `/`), Symmetric Triad Brackets (`[]`, `{}`, `()`), and Auto-Typed Scalars.
+ * Context-aware Lexer for Razomy Notation (.rn) v0.3.0:
+ * - Symmetric Pentad (`[`, `{`, `(`, `"`, `#`)
+ * - Inline (`# text`) and Block (`#\n ...`) Homoiconic Comments
+ * - Space Law & Attached Type Constructors (`Sql(`, `Html[`, `Scss{`, `Date"..."`, `Ts"`)
+ * - Column-0 Raw Strings (`(Type)?(N)?"` ... `"(N)?`)
+ * - Symbols (`'pk`), Unified `None`, Algebraic Operators (`&`, `^`, `/`)
  */
 class RnLexer : LexerBase() {
     private var buffer: CharSequence = ""
@@ -112,10 +124,14 @@ class RnLexer : LexerBase() {
             return
         }
 
-        // Homoiconic Comment: `# ` or `#` at end of line
+        // Homoiconic Comment: `# ` (inline) or `#` at EOL (indented block comment)
         if (ch == '#' && isAtStartOfLineOrWhitespace(tokenStart)) {
+            if (isEndOfLineHash(pos)) {
+                consumeBlockComment(pos)
+                return
+            }
             val nextCh = if (pos + 1 < endOffset) buffer[pos + 1] else '\n'
-            if (nextCh == ' ' || nextCh == '\t' || nextCh == '\n' || nextCh == '\r') {
+            if (nextCh == ' ' || nextCh == '\t') {
                 while (pos < endOffset && buffer[pos] != '\n') {
                     pos++
                 }
@@ -203,7 +219,7 @@ class RnLexer : LexerBase() {
                 break
             }
             if (c == '"') {
-                // Check if this is a Column-0 raw string opener `(tag)?(N)?"` at end of line
+                // Check if this is a Column-0 raw string opener `(Type)?(N)?"` at end of line
                 if (isEndOfLineQuote(pos)) {
                     val marker = buffer.subSequence(tokenStart, pos).toString()
                     val rankDigits = marker.takeLastWhile { it.isDigit() }
@@ -227,17 +243,50 @@ class RnLexer : LexerBase() {
         val word = buffer.subSequence(tokenStart, tokenEnd).toString()
 
         currentToken = when {
-            word == "true" || word == "false" || word == "null" || word == "None" ||
-                word in setOf("title", "subtitle", "part", "section", "topic", "quote") -> RnTypes.KEYWORD
+            word == "true" || word == "false" || word == "None" ||
+                    word in setOf("title", "subtitle", "part", "section", "topic", "quote") -> RnTypes.KEYWORD
             isNumberLiteral(word) -> RnTypes.NUMBER
+            // v0.3.0 Space Law: Type Constructor attaches directly to `[`, `{`, `(` with NO space (or with space in legacy)
             isPascalCase(word) && isFollowedByBracketOnLine(tokenEnd) -> RnTypes.SCHEMA_PORTAL
             isFirstTokenOnLine(tokenStart) -> RnTypes.KEY
             else -> RnTypes.TEXT
         }
     }
 
+    /**
+     * Consumes a v0.3.0 Block Comment (`#` at end of line) until dedent back to `<= baseIndent`.
+     */
+    private fun consumeBlockComment(hashPos: Int) {
+        val baseIndent = getLineIndentAt(hashPos)
+        // Advance to end of the `#` header line
+        while (pos < endOffset && buffer[pos] != '\n') {
+            pos++
+        }
+        // Consume subsequent lines that are either blank or indented deeper than baseIndent
+        while (pos < endOffset && buffer[pos] == '\n') {
+            val nextLineStart = pos + 1
+            if (nextLineStart >= endOffset) break
+            var i = nextLineStart
+            var indent = 0
+            while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
+                indent++
+                i++
+            }
+            val isBlankLine = i >= endOffset || buffer[i] == '\n' || buffer[i] == '\r'
+            if (isBlankLine || indent > baseIndent) {
+                pos = i
+                while (pos < endOffset && buffer[pos] != '\n') {
+                    pos++
+                }
+            } else {
+                break
+            }
+        }
+        tokenEnd = pos
+        currentToken = RnTypes.COMMENT
+    }
+
     private fun consumeCol0RawString(rankDigits: String) {
-        // Consume the opening `"` and everything until `\n"<rankDigits>` at Column 0
         if (pos < endOffset && buffer[pos] == '"') pos++
         val closeMarker = "\"$rankDigits"
         while (pos < endOffset) {
@@ -257,6 +306,28 @@ class RnLexer : LexerBase() {
         }
         tokenEnd = pos
         currentToken = RnTypes.COL0_RAW
+    }
+
+    private fun getLineIndentAt(idx: Int): Int {
+        var lineStart = idx
+        while (lineStart > startOffset && buffer[lineStart - 1] != '\n') {
+            lineStart--
+        }
+        var indent = 0
+        var i = lineStart
+        while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
+            indent++
+            i++
+        }
+        return indent
+    }
+
+    private fun isEndOfLineHash(hashPos: Int): Boolean {
+        var i = hashPos + 1
+        while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t' || buffer[i] == '\r')) {
+            i++
+        }
+        return i >= endOffset || buffer[i] == '\n'
     }
 
     private fun isEndOfLineQuote(quotePos: Int): Boolean {
@@ -286,6 +357,7 @@ class RnLexer : LexerBase() {
     }
 
     private fun isFollowedByBracketOnLine(afterIdx: Int): Boolean {
+        // Supports both attached `Sql(` (no space) and `Sql (`
         var i = afterIdx
         while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
             i++
@@ -309,8 +381,7 @@ class RnFile(viewProvider: FileViewProvider) : PsiFileBase(viewProvider, RnLangu
 }
 
 /**
- * PSI Host Element for Column-0 Multiline Raw Strings (`json"`, `ts"`, `sql"`, `html"`, `rn2"`, etc.).
- * Enables IntelliJ Language Injection (syntax highlighting, inspections, completion inside embedded code blocks).
+ * PSI Host Element for Column-0 Multiline Raw Strings (`Json"`, `Ts"`, `Sql"`, `Html"`, `Rn2"`, etc.).
  */
 class RnCol0RawBlockPsiElement(node: ASTNode) : ASTWrapperPsiElement(node), PsiLanguageInjectionHost {
     override fun isValidHost(): Boolean = true
@@ -326,9 +397,6 @@ class RnCol0RawBlockPsiElement(node: ASTNode) : ASTWrapperPsiElement(node), PsiL
     override fun createLiteralTextEscaper(): LiteralTextEscaper<out PsiLanguageInjectionHost> =
         LiteralTextEscaper.createSimple(this)
 
-    /**
-     * Extracts the language tag prefix from `(tag)?(N)?"` (e.g. `json"` -> `json`, `rn2"` -> `rn`, `sh1"` -> `sh`).
-     */
     fun getLanguageTag(): String {
         val raw = text
         val firstNewline = raw.indexOf('\n')
@@ -338,10 +406,6 @@ class RnCol0RawBlockPsiElement(node: ASTNode) : ASTWrapperPsiElement(node), PsiL
         return withoutQuote.dropLastWhile { it.isDigit() }.trim()
     }
 
-    /**
-     * Computes the inner text range (relative to this PSI element) inside the Column-0 multiline string,
-     * excluding the opening `(tag)?(N)?"\n` line and the closing `\n"(N)?` line.
-     */
     fun getContentRangeInHost(): TextRange? {
         val raw = text
         val firstNewline = raw.indexOf('\n')
@@ -364,10 +428,6 @@ class RnCol0RawBlockPsiElement(node: ASTNode) : ASTWrapperPsiElement(node), PsiL
     }
 }
 
-/**
- * Injects guest languages (JSON, TypeScript/JavaScript, SQL, HTML, SCSS/CSS, Markdown, Shell, Razomy Notation, etc.)
- * into tagged Column-0 multiline strings (`json"`, `ts"`, `sql"`, `html"`, `scss"`, `md"`, `sh1"`, `rn2"`, etc.).
- */
 class RnLanguageInjector : MultiHostInjector {
     override fun elementsToInjectIn(): List<Class<out PsiElement>> =
         listOf(RnCol0RawBlockPsiElement::class.java)
@@ -392,7 +452,6 @@ class RnLanguageInjector : MultiHostInjector {
             return RnLanguage
         }
 
-        // Map common shorthand tags to IntelliJ Language IDs and file extensions
         val idCandidates = when (tag) {
             "json", "json5" -> listOf("JSON", "JSON5")
             "ts", "typescript" -> listOf("TypeScript", "JavaScript", "ECMAScript 6")
@@ -418,14 +477,12 @@ class RnLanguageInjector : MultiHostInjector {
             else -> listOf(rawTag, tag.uppercase())
         }
 
-        // 1. Try direct Language ID lookup (case-insensitive)
         val registered = Language.getRegisteredLanguages()
         for (candidate in idCandidates) {
             Language.findLanguageByID(candidate)?.let { return it }
             registered.firstOrNull { it.id.equals(candidate, ignoreCase = true) }?.let { return it }
         }
 
-        // 2. Fallback: lookup by file extension in IntelliJ FileTypeManager
         val extCandidates = when (tag) {
             "typescript" -> listOf("ts", "js")
             "javascript" -> listOf("js")
@@ -529,7 +586,7 @@ class RnCommenter : Commenter {
 }
 
 /**
- * 1-Space Topological Folding Builder for `.rn` blocks (`{`, `(`, `[` at end of line) and Column-0 Raw Strings.
+ * Topological Folding Builder for `.rn` v0.3.0 blocks (`{`, `(`, `[`, `#` at end of line).
  */
 class RnFoldingBuilder : FoldingBuilderEx() {
     override fun buildFoldRegions(root: PsiElement, document: Document, quick: Boolean): Array<FoldingDescriptor> {
@@ -540,10 +597,12 @@ class RnFoldingBuilder : FoldingBuilderEx() {
             val endOffset = document.getLineEndOffset(line)
             val lineText = document.getText(TextRange(startOffset, endOffset))
             val trimmed = lineText.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            if (trimmed.isEmpty()) continue
+            // Inline comment `# ...` is single-line, whereas bare `#` at EOL is a foldable block comment
+            if (trimmed.startsWith("#") && trimmed != "#") continue
 
             val indent = lineText.takeWhile { it == ' ' || it == '\t' }.length
-            if (trimmed.endsWith("{") || trimmed.endsWith("(") || trimmed.endsWith("[")) {
+            if (trimmed.endsWith("{") || trimmed.endsWith("(") || trimmed.endsWith("[") || trimmed == "#") {
                 var lastChildLine = line
                 for (sub in (line + 1) until lineCount) {
                     val subStart = document.getLineStartOffset(sub)
@@ -572,46 +631,768 @@ class RnFoldingBuilder : FoldingBuilderEx() {
     override fun isCollapsedByDefault(node: ASTNode): Boolean = false
 }
 
+/**
+ * Visual Column Formatter for Razomy Notation (`.rn`) v0.3.0:
+ * Aligns 2D Relational Tables (`(` blocks where the first child line has top-level commas)
+ * into clean visual columns (just like Markdown table formatting in JetBrains IDEs),
+ * while preserving Column-0 multiline raw strings untouched!
+ */
+object RnTableFormatter {
+
+    fun formatDocument(text: String): String {
+        val lines = text.split("\n")
+        val result = lines.toMutableList()
+        var i = 0
+
+        while (i < result.size) {
+            val line = result[i]
+            val trimmedRight = line.trimEnd('\r', ' ', '\t')
+
+            // 1. Skip Column-0 Raw Multiline Strings `(Type)?(N)?"` so their literal content is never touched
+            val col0Rank = detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                i++
+                while (i < result.size) {
+                    if (result[i].trimEnd('\r', ' ', '\t') == closeMarker) {
+                        break
+                    }
+                    i++
+                }
+                i++
+                continue
+            }
+
+            // 2. Skip Block Comments (`#` at EOL)
+            if (trimmedRight.trim() == "#") {
+                val baseIndent = getIndentLength(line)
+                i++
+                while (i < result.size) {
+                    val sub = result[i]
+                    if (sub.isNotBlank() && getIndentLength(sub) <= baseIndent) break
+                    i++
+                }
+                continue
+            }
+
+            // 3. Detect Tuple block opener `(` or `Type(` at EOL
+            val codePart = stripInlineComment(trimmedRight).trimEnd()
+            if (codePart.endsWith("(")) {
+                val parentIndent = getIndentLength(line)
+                val blockEnd = findBlockEnd(result, i, parentIndent)
+                if (blockEnd > i) {
+                    formatTupleIf2DTable(result, i + 1, blockEnd)
+                }
+            }
+
+            i++
+        }
+
+        return result.joinToString("\n")
+    }
+
+    /**
+     * Checks if the lines in `startLine..endLine` form a 2D Relational Table (Axiom III.3:
+     * first indented non-blank line contains at least one top-level comma) and aligns all rows by column.
+     */
+    private fun formatTupleIf2DTable(lines: MutableList<String>, startLine: Int, endLine: Int) {
+        // Find the first non-blank child line
+        var firstChildIdx = -1
+        for (idx in startLine..endLine) {
+            if (lines[idx].isNotBlank()) {
+                firstChildIdx = idx
+                break
+            }
+        }
+        if (firstChildIdx == -1) return
+
+        val rowIndentLen = getIndentLength(lines[firstChildIdx])
+        val firstRowCells = splitTopLevelRow(lines[firstChildIdx]) ?: return
+        // A 2D table in .rn must have at least one top-level comma on the header line
+        if (firstRowCells.cells.size < 2) return
+
+        // Collect all direct child rows at `rowIndentLen` that contain top-level commas
+        data class ParsedRow(
+            val lineIndex: Int,
+            val indentStr: String,
+            val cells: List<String>,
+            val trailingComment: String?
+        )
+
+        val parsedRows = mutableListOf<ParsedRow>()
+        for (idx in firstChildIdx..endLine) {
+            val rawLine = lines[idx]
+            if (rawLine.isBlank()) continue
+            val indent = getIndentLength(rawLine)
+            // Only align rows at the table's row indentation level
+            if (indent != rowIndentLen) continue
+            val trimmed = rawLine.trim()
+            if (trimmed.startsWith("#")) continue
+
+            val split = splitTopLevelRow(rawLine) ?: continue
+            if (split.cells.size < 2) continue
+
+            parsedRows.add(
+                ParsedRow(
+                    lineIndex = idx,
+                    indentStr = rawLine.substring(0, indent),
+                    cells = split.cells,
+                    trailingComment = split.trailingComment
+                )
+            )
+        }
+
+        if (parsedRows.size < 2) return
+
+        // Compute maximum visual width for each column
+        val maxCols = parsedRows.maxOf { it.cells.size }
+        val colWidths = IntArray(maxCols)
+        for (row in parsedRows) {
+            for (c in row.cells.indices) {
+                val cellLen = row.cells[c].length
+                if (cellLen > colWidths[c]) {
+                    colWidths[c] = cellLen
+                }
+            }
+        }
+
+        // Rebuild each row with aligned columns (just like Markdown tables, using `, `)
+        for (row in parsedRows) {
+            val sb = StringBuilder(row.indentStr)
+            val lastColIdx = row.cells.lastIndex
+            for (c in 0..lastColIdx) {
+                val cellText = row.cells[c]
+                sb.append(cellText)
+                if (c < lastColIdx) {
+                    sb.append(",")
+                    val padCount = (colWidths[c] - cellText.length) + 1
+                    sb.append(" ".repeat(padCount.coerceAtLeast(1)))
+                }
+            }
+            if (!row.trailingComment.isNullOrEmpty()) {
+                sb.append(" ").append(row.trailingComment)
+            }
+            lines[row.lineIndex] = sb.toString()
+        }
+    }
+
+    private data class RowSplitResult(
+        val cells: List<String>,
+        val trailingComment: String?
+    )
+
+    /**
+     * Splits a single table row by top-level `,` while respecting:
+     * - Quoted strings `"Hello, world!"`
+     * - Typed literals `Date"12,12"`
+     * - Backtick spans `` `a, b` ``
+     * - Nested brackets `(...)`, `{...}`, `[...]`
+     * - Trailing inline comments `# comment`
+     */
+    private fun splitTopLevelRow(rawLine: String): RowSplitResult? {
+        val cleanLine = rawLine.trimEnd('\r')
+        val contentWithoutComment = stripInlineComment(cleanLine)
+        val trailingComment = if (contentWithoutComment.length < cleanLine.length) {
+            cleanLine.substring(contentWithoutComment.length).trim()
+        } else {
+            null
+        }
+
+        val trimmed = contentWithoutComment.trim()
+        if (trimmed.isEmpty()) return null
+
+        val cells = mutableListOf<String>()
+        val current = StringBuilder()
+        var inQuotes = false
+        var inBackticks = false
+        var bracketDepth = 0
+        var i = 0
+
+        while (i < trimmed.length) {
+            val ch = trimmed[i]
+
+            if (inQuotes) {
+                current.append(ch)
+                if (ch == '\\' && i + 1 < trimmed.length) {
+                    current.append(trimmed[i + 1])
+                    i += 2
+                    continue
+                }
+                if (ch == '"') {
+                    inQuotes = false
+                }
+                i++
+                continue
+            }
+
+            if (inBackticks) {
+                current.append(ch)
+                if (ch == '`') {
+                    inBackticks = false
+                }
+                i++
+                continue
+            }
+
+            when (ch) {
+                '"' -> {
+                    inQuotes = true
+                    current.append(ch)
+                }
+                '`' -> {
+                    inBackticks = true
+                    current.append(ch)
+                }
+                '(', '{', '[' -> {
+                    bracketDepth++
+                    current.append(ch)
+                }
+                ')', '}', ']' -> {
+                    if (bracketDepth > 0) bracketDepth--
+                    current.append(ch)
+                }
+                ',' -> {
+                    if (bracketDepth == 0) {
+                        cells.add(current.toString().trim())
+                        current.setLength(0)
+                    } else {
+                        current.append(ch)
+                    }
+                }
+                else -> current.append(ch)
+            }
+            i++
+        }
+
+        cells.add(current.toString().trim())
+        return RowSplitResult(cells, trailingComment)
+    }
+
+    /**
+     * Strips inline `# comment` outside quotes/backticks.
+     */
+    private fun stripInlineComment(line: String): String {
+        var inQuotes = false
+        var inBackticks = false
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
+            if (inQuotes) {
+                if (ch == '\\' && i + 1 < line.length) {
+                    i += 2
+                    continue
+                }
+                if (ch == '"') inQuotes = false
+                i++
+                continue
+            }
+            if (inBackticks) {
+                if (ch == '`') inBackticks = false
+                i++
+                continue
+            }
+            if (ch == '"') {
+                inQuotes = true
+            } else if (ch == '`') {
+                inBackticks = true
+            } else if (ch == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+                val nextCh = if (i + 1 < line.length) line[i + 1] else '\n'
+                if (nextCh == ' ' || nextCh == '\t' || nextCh == '\n') {
+                    return line.substring(0, i).trimEnd()
+                }
+            }
+            i++
+        }
+        return line
+    }
+
+    /**
+     * Detects if a line ends with a Column-0 raw string opener (`"`, `1"`, `Ts"`, `Rn2"`, etc.)
+     * rather than an inline closed string `"..."`. Returns the rank digits (`""`, `"1"`, `"2"`) or `null`.
+     */
+    private fun detectCol0RawOpenerRank(trimmedRight: String): String? {
+        if (!trimmedRight.endsWith('"')) return null
+        // Count unescaped quotes on the line: if odd, the final `"` opens a multiline raw string!
+        var quoteCount = 0
+        var i = 0
+        while (i < trimmedRight.length) {
+            if (trimmedRight[i] == '\\' && i + 1 < trimmedRight.length) {
+                i += 2
+                continue
+            }
+            if (trimmedRight[i] == '"') quoteCount++
+            i++
+        }
+        if (quoteCount % 2 == 0) return null
+
+        val beforeQuote = trimmedRight.dropLast(1)
+        return beforeQuote.takeLastWhile { it.isDigit() }
+    }
+
+    private fun findBlockEnd(lines: List<String>, openLine: Int, parentIndent: Int): Int {
+        var lastChild = openLine
+        for (sub in (openLine + 1) until lines.size) {
+            val subText = lines[sub]
+            if (subText.isBlank()) continue
+            val subIndent = getIndentLength(subText)
+            if (subIndent > parentIndent) {
+                lastChild = sub
+            } else {
+                break
+            }
+        }
+        return lastChild
+    }
+
+    private fun getIndentLength(line: String): Int =
+        line.takeWhile { it == ' ' || it == '\t' }.length
+}
+
+/**
+ * Registers `Ctrl + Alt + L` (`Cmd + Option + L`) Reformat Code support for `.rn` files in IntelliJ IDEA.
+ */
+class RnFormattingService : AsyncDocumentFormattingService() {
+    override fun getFeatures(): MutableSet<FormattingService.Feature> =
+        EnumSet.noneOf(FormattingService.Feature::class.java)
+
+    override fun canFormat(file: PsiFile): Boolean = file is RnFile
+
+    override fun createFormattingTask(request: AsyncFormattingRequest): FormattingTask? {
+        val documentText = request.documentText
+        return object : FormattingTask {
+            override fun run() {
+                val formatted = RnTableFormatter.formatDocument(documentText)
+                request.onTextReady(formatted)
+            }
+
+            override fun cancel(): Boolean = true
+            override fun isRunUnderProgress(): Boolean = false
+        }
+    }
+
+    override fun getNotificationGroupId(): String = "Razomy Notation"
+    override fun getName(): String = "Razomy Notation Table Formatter"
+}
+
 class RnColorSettingsPage : ColorSettingsPage {
     private val descriptors = arrayOf(
         AttributesDescriptor("Comment (# )", RnSyntaxHighlighter.COMMENT),
         AttributesDescriptor("Key / Tag Name", RnSyntaxHighlighter.KEY),
-        AttributesDescriptor("Schema Portal (Sql, Html, Scss, Md)", RnSyntaxHighlighter.SCHEMA_PORTAL),
+        AttributesDescriptor("Type Constructor (Sql, Html, Scss, Md)", RnSyntaxHighlighter.SCHEMA_PORTAL),
         AttributesDescriptor("Symbol ('pk, 'GET)", RnSyntaxHighlighter.SYMBOL),
         AttributesDescriptor("Typed Literal (Date\"...\")", RnSyntaxHighlighter.TYPED_LITERAL),
         AttributesDescriptor("String", RnSyntaxHighlighter.STRING),
         AttributesDescriptor("Column-0 Raw String", RnSyntaxHighlighter.COL0_RAW),
         AttributesDescriptor("Number", RnSyntaxHighlighter.NUMBER),
-        AttributesDescriptor("Keyword / Boolean / Null", RnSyntaxHighlighter.KEYWORD),
+        AttributesDescriptor("Keyword / Boolean / None", RnSyntaxHighlighter.KEYWORD),
         AttributesDescriptor("Algebra Operator (&, ^, /)", RnSyntaxHighlighter.OPERATOR),
-        AttributesDescriptor("Symmetric Triad Bracket ([], {}, ())", RnSyntaxHighlighter.BRACKET)
+        AttributesDescriptor("Symmetric Pentad Bracket ([], {}, ())", RnSyntaxHighlighter.BRACKET)
     )
 
     override fun getIcon(): Icon = RnIcons.FILE
     override fun getHighlighter(): SyntaxHighlighter = RnSyntaxHighlighter()
     override fun getDemoText(): String = """
-        # Razomy Notation (.rn) v0.1.0 Sample
+        # Razomy Notation (.rn) v0.3.0 Sample
+        #
+         Multiline block comment!
+         Auto-closed on dedent with zero '#' on inner lines.
         cluster.primary.database {
          engine postgres
          port 5432
          tls true
+         fallback None
          created_at Date"12.12.23"
          role 'pk
          welcome_msg 1"
         Line 1 starts at Column 0!
         "1
         
+        users_schema (
+         column, type, constraint, default
+         id,     Uuid, 'pk,        gen_uuid
+         org_id, Uuid, Orgs.id,    None
+         role,   Text, 'not_null,  member
+        
         UserCard & BaseCard / debug {
-         query Sql (
-          select, from, where
-          "*", users, "id = :id"
-         view Html [
+         query Sql(
+          select, from,  where
+          "*",    users, "id = :id"
+         view Html[
           div{class card} [
-           h2 [ User Profile ]
+           h2 [ User Profile
     """.trimIndent()
 
     override fun getAdditionalHighlightingTagToDescriptorMap(): Map<String, TextAttributesKey>? = null
     override fun getAttributeDescriptors(): Array<AttributesDescriptor> = descriptors
     override fun getColorDescriptors(): Array<ColorDescriptor> = ColorDescriptor.EMPTY_ARRAY
     override fun getDisplayName(): String = "Razomy Notation (.rn)"
+}
+
+/**
+ * Visual Auto-Numbering Inlay Hints for Razomy Notation (.rn) v0.3.0:
+ * 1. Hierarchical Markdown Heading Numbering (`part` -> `1.`, `section` -> `1.1.`, `topic` -> `1.1.1.`)
+ * 2. 2D Table Badge (`Table 1`) & Row Auto-Numbering (`#1`, `#2`, `#3` skipping the header row)
+ * 3. Ordered List (`ol [`) hierarchical item numbering (`1.`, `2.`, `2.1.`)
+ */
+@Suppress("UnstableApiUsage")
+class RnVisualNumberingHintsProvider : InlayHintsProvider<NoSettings> {
+    override val key: SettingsKey<NoSettings> = SettingsKey("rn.visual.numbering.hints")
+    override val name: String = "Razomy Visual Auto-Numbering (Md Headings & 2D Tables)"
+    override val previewText: String = """
+        part AXIOMATIC SPECIFICATION
+        section AXIOM II: SPATIAL TOPOLOGY
+        topic Inline Mode
+        topic Block Mode
+        
+        users_schema (
+         column, type, constraint, default
+         id,     Uuid, 'pk,        gen_uuid
+         org_id, Uuid, Orgs.id,    None
+         role,   Text, 'not_null,  member
+    """.trimIndent()
+
+    override fun createSettings(): NoSettings = NoSettings()
+
+    override fun createConfigurable(settings: NoSettings): ImmediateConfigurable = object : ImmediateConfigurable {
+        override fun createComponent(listener: ChangeListener): JComponent = JPanel()
+    }
+
+    override fun getCollectorFor(
+        file: PsiFile,
+        editor: Editor,
+        settings: NoSettings,
+        sink: InlayHintsSink
+    ): InlayHintsCollector {
+        return object : FactoryInlayHintsCollector(editor) {
+            private var rendered = false
+
+            override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
+                // Run once at the root PsiFile level so we can compute top-to-bottom hierarchical counters
+                if (rendered || element !is PsiFile) return true
+                rendered = true
+
+                val document = editor.document
+                val text = document.charsSequence
+                val lineCount = document.lineCount
+
+                var partCounter = 0
+                var sectionCounter = 0
+                var topicCounter = 0
+                var tableCounter = 0
+
+                var line = 0
+                while (line < lineCount) {
+                    val lineStart = document.getLineStartOffset(line)
+                    val lineEnd = document.getLineEndOffset(line)
+                    val rawLine = text.subSequence(lineStart, lineEnd).toString()
+                    val trimmedRight = rawLine.trimEnd('\r', ' ', '\t')
+                    val trimmed = trimmedRight.trim()
+
+                    // 1. Skip Column-0 Raw Multiline Strings `(Type)?(N)?"` so embedded code isn't numbered
+                    val col0Rank = detectCol0Opener(trimmedRight)
+                    if (col0Rank != null) {
+                        val closeMarker = "\"$col0Rank"
+                        line++
+                        while (line < lineCount) {
+                            val subStart = document.getLineStartOffset(line)
+                            val subEnd = document.getLineEndOffset(line)
+                            val subLine = text.subSequence(subStart, subEnd).toString().trimEnd('\r', ' ', '\t')
+                            if (subLine == closeMarker) break
+                            line++
+                        }
+                        line++
+                        continue
+                    }
+
+                    // 2. Skip Block Comments (`#` at EOL)
+                    if (trimmed == "#") {
+                        val baseIndent = getIndent(rawLine)
+                        line++
+                        while (line < lineCount) {
+                            val subStart = document.getLineStartOffset(line)
+                            val subEnd = document.getLineEndOffset(line)
+                            val subLine = text.subSequence(subStart, subEnd).toString()
+                            if (subLine.isNotBlank() && getIndent(subLine) <= baseIndent) break
+                            line++
+                        }
+                        continue
+                    }
+
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                        line++
+                        continue
+                    }
+
+                    val indent = getIndent(rawLine)
+                    val firstWord = trimmed.takeWhile { !it.isWhitespace() && it != '[' && it != '{' && it != '(' }
+
+                    // 3. Markdown Headings: `part`, `section`, `topic` -> `1.`, `1.1.`, `1.1.1.`
+                    when (firstWord) {
+                        "part" -> {
+                            partCounter++
+                            sectionCounter = 0
+                            topicCounter = 0
+                            val kwEndOffset = lineStart + indent + "part".length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("part").trimStart())
+                            if (!cleanAfter.alreadyNumbered) {
+                                addBadge(sink, factory, kwEndOffset, " $partCounter.")
+                            }
+                        }
+                        "section" -> {
+                            sectionCounter++
+                            topicCounter = 0
+                            val label = if (partCounter > 0) "$partCounter.$sectionCounter." else "$sectionCounter."
+                            val kwEndOffset = lineStart + indent + "section".length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("section").trimStart())
+                            if (!cleanAfter.alreadyNumbered) {
+                                addBadge(sink, factory, kwEndOffset, " $label")
+                            }
+                        }
+                        "topic" -> {
+                            topicCounter++
+                            val label = when {
+                                partCounter > 0 && sectionCounter > 0 -> "$partCounter.$sectionCounter.$topicCounter."
+                                sectionCounter > 0 -> "$sectionCounter.$topicCounter."
+                                partCounter > 0 -> "$partCounter.$topicCounter."
+                                else -> "$topicCounter."
+                            }
+                            val kwEndOffset = lineStart + indent + "topic".length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("topic").trimStart())
+                            if (!cleanAfter.alreadyNumbered) {
+                                addBadge(sink, factory, kwEndOffset, " $label")
+                            }
+                        }
+                    }
+
+                    // 4. Ordered Lists `ol [` -> `1.`, `2.`, `2.1.`
+                    val codePart = trimmedRight.substringBefore(" #").trimEnd()
+                    if (firstWord == "ol" && codePart.endsWith("[")) {
+                        val blockEnd = findBlockEnd(document, line, indent)
+                        if (blockEnd > line) {
+                            numberOrderedListBlock(document, line + 1, blockEnd, indent, "", sink, factory)
+                        }
+                    }
+
+                    // 5. 2D Relational Tables `(` -> `[Table N]` + Row numbers `#1`, `#2`, ...
+                    if (codePart.endsWith("(")) {
+                        val blockEnd = findBlockEnd(document, line, indent)
+                        if (blockEnd > line && is2DTableBlock(document, line + 1, blockEnd)) {
+                            tableCounter++
+                            val tableBadge = if (partCounter > 0 && sectionCounter > 0) {
+                                "Table $partCounter.$sectionCounter.$tableCounter"
+                            } else {
+                                "Table $tableCounter"
+                            }
+                            // Show `[Table N]` right after the opening `(`
+                            addBadge(sink, factory, lineEnd, " $tableBadge")
+
+                            // Number each data row `#1`, `#2`, `#3` (skipping the first header row)
+                            number2DTableRows(document, line + 1, blockEnd, sink, factory)
+                        }
+                    }
+
+                    line++
+                }
+
+                return false
+            }
+        }
+    }
+
+    private fun number2DTableRows(
+        document: Document,
+        startLine: Int,
+        endLine: Int,
+        sink: InlayHintsSink,
+        factory: PresentationFactory
+    ) {
+        val text = document.charsSequence
+        var headerLineIdx = -1
+        var rowIndent = -1
+
+        for (l in startLine..endLine) {
+            val s = document.getLineStartOffset(l)
+            val e = document.getLineEndOffset(l)
+            val lineStr = text.subSequence(s, e).toString()
+            if (lineStr.isNotBlank() && !lineStr.trim().startsWith("#")) {
+                headerLineIdx = l
+                rowIndent = getIndent(lineStr)
+                break
+            }
+        }
+        if (headerLineIdx == -1) return
+
+        // Add subtle `cols` hint or start numbering from the row AFTER the header
+        var rowNumber = 0
+        val padWidth = (endLine - headerLineIdx).toString().length.coerceAtLeast(1)
+
+        for (l in (headerLineIdx + 1)..endLine) {
+            val s = document.getLineStartOffset(l)
+            val e = document.getLineEndOffset(l)
+            val lineStr = text.subSequence(s, e).toString()
+            val trimmed = lineStr.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            val indent = getIndent(lineStr)
+            if (indent != rowIndent) continue
+            if (!hasTopLevelComma(trimmed)) continue
+
+            rowNumber++
+            val rowLabel = "${rowNumber.toString().padStart(padWidth, ' ')}. "
+            addBadge(sink, factory, s + indent, rowLabel)
+        }
+    }
+
+    private fun numberOrderedListBlock(
+        document: Document,
+        startLine: Int,
+        endLine: Int,
+        parentIndent: Int,
+        prefix: String,
+        sink: InlayHintsSink,
+        factory: PresentationFactory
+    ) {
+        val text = document.charsSequence
+        var itemIndent = -1
+        for (l in startLine..endLine) {
+            val lineStr = text.subSequence(document.getLineStartOffset(l), document.getLineEndOffset(l)).toString()
+            if (lineStr.isNotBlank() && !lineStr.trim().startsWith("#")) {
+                itemIndent = getIndent(lineStr)
+                break
+            }
+        }
+        if (itemIndent <= parentIndent) return
+
+        var itemIdx = 0
+        var l = startLine
+        while (l <= endLine) {
+            val s = document.getLineStartOffset(l)
+            val e = document.getLineEndOffset(l)
+            val lineStr = text.subSequence(s, e).toString()
+            val trimmed = lineStr.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                l++
+                continue
+            }
+            val indent = getIndent(lineStr)
+            if (indent == itemIndent) {
+                itemIdx++
+                val currentNumber = if (prefix.isEmpty()) "$itemIdx" else "$prefix.$itemIdx"
+                addBadge(sink, factory, s + indent, "$currentNumber. ")
+
+                // Check if this item has nested outline children (`+Q` indent)
+                val childEnd = findBlockEnd(document, l, itemIndent).coerceAtMost(endLine)
+                if (childEnd > l) {
+                    numberOrderedListBlock(document, l + 1, childEnd, itemIndent, currentNumber, sink, factory)
+                    l = childEnd + 1
+                    continue
+                }
+            }
+            l++
+        }
+    }
+
+    private fun addBadge(
+        sink: InlayHintsSink,
+        factory: PresentationFactory,
+        offset: Int,
+        label: String
+    ) {
+        val presentation: InlayPresentation = factory.roundWithBackground(factory.smallText(label))
+        sink.addInlineElement(offset, relatesToPrecedingText = true, presentation = presentation, placeAtTheEndOfLine = false)
+    }
+
+    private data class ManualNumberCheck(val alreadyNumbered: Boolean)
+
+    /**
+     * Avoids duplicating numbers if the author already manually wrote `topic 1. Inline Mode`.
+     */
+    private fun stripManualLeadingNumber(restOfHeading: String): ManualNumberCheck {
+        val firstToken = restOfHeading.takeWhile { !it.isWhitespace() }
+        val isManualNum = firstToken.isNotEmpty() &&
+                firstToken.endsWith(".") &&
+                firstToken.dropLast(1).all { it.isDigit() || it == '.' }
+        return ManualNumberCheck(alreadyNumbered = isManualNum)
+    }
+
+    private fun is2DTableBlock(document: Document, startLine: Int, endLine: Int): Boolean {
+        val text = document.charsSequence
+        for (l in startLine..endLine) {
+            val s = document.getLineStartOffset(l)
+            val e = document.getLineEndOffset(l)
+            val lineStr = text.subSequence(s, e).toString().trim()
+            if (lineStr.isEmpty() || lineStr.startsWith("#")) continue
+            return hasTopLevelComma(lineStr)
+        }
+        return false
+    }
+
+    private fun hasTopLevelComma(line: String): Boolean {
+        var inQuotes = false
+        var inBackticks = false
+        var depth = 0
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
+            if (inQuotes) {
+                if (ch == '\\' && i + 1 < line.length) {
+                    i += 2
+                    continue
+                }
+                if (ch == '"') inQuotes = false
+                i++
+                continue
+            }
+            if (inBackticks) {
+                if (ch == '`') inBackticks = false
+                i++
+                continue
+            }
+            when (ch) {
+                '"' -> inQuotes = true
+                '`' -> inBackticks = true
+                '(', '{', '[' -> depth++
+                ')', '}', ']' -> if (depth > 0) depth--
+                '#' -> if (i == 0 || line[i - 1].isWhitespace()) break
+                ',' -> if (depth == 0) return true
+            }
+            i++
+        }
+        return false
+    }
+
+    private fun detectCol0Opener(trimmedRight: String): String? {
+        if (!trimmedRight.endsWith('"')) return null
+        var quotes = 0
+        var i = 0
+        while (i < trimmedRight.length) {
+            if (trimmedRight[i] == '\\' && i + 1 < trimmedRight.length) {
+                i += 2
+                continue
+            }
+            if (trimmedRight[i] == '"') quotes++
+            i++
+        }
+        if (quotes % 2 == 0) return null
+        return trimmedRight.dropLast(1).takeLastWhile { it.isDigit() }
+    }
+
+    private fun findBlockEnd(document: Document, openLine: Int, parentIndent: Int): Int {
+        val text = document.charsSequence
+        var lastChild = openLine
+        for (sub in (openLine + 1) until document.lineCount) {
+            val s = document.getLineStartOffset(sub)
+            val e = document.getLineEndOffset(sub)
+            val subText = text.subSequence(s, e).toString()
+            if (subText.isBlank()) continue
+            if (getIndent(subText) > parentIndent) {
+                lastChild = sub
+            } else {
+                break
+            }
+        }
+        return lastChild
+    }
+
+    private fun getIndent(line: String): Int =
+        line.takeWhile { it == ' ' || it == '\t' }.length
 }

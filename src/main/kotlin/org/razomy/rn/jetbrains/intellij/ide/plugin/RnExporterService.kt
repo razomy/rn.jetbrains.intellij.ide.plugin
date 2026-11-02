@@ -246,7 +246,7 @@ object RnExporterService {
     private fun notify(project: Project, content: String, type: NotificationType) {
         try {
             NotificationGroupManager.getInstance()
-                .getNotificationGroup("RazomyNotation.Notifications")
+                .getNotificationGroup("RN.Notifications")
                 .createNotification("Razomy Notation (.rn)", content, type)
                 .notify(project)
         } catch (_: Exception) {
