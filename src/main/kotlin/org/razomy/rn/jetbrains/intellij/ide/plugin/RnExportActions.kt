@@ -1,4 +1,4 @@
-package org.razomy.rn.intellij.plugin
+package org.razomy.rn.jetbrains.intellij.ide.plugin
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction

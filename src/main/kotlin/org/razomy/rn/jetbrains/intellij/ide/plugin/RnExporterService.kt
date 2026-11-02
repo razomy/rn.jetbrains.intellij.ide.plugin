@@ -1,4 +1,4 @@
-package org.razomy.rn.intellij.plugin
+package org.razomy.rn.jetbrains.intellij.ide.plugin
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType

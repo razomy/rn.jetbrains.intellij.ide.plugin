@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>org.razomy.rn.intellij.plugin</id>
+    <id>org.razomy.rn</id>
     <name>Razomy Notation (.rn)</name>
     <vendor url="https://razomy.org">Razomy</vendor>
 
@@ -19,7 +19,7 @@
         <!-- File Type Registration (.rn and .rl) -->
         <fileType
             name="Razomy Notation"
-            implementationClass="org.razomy.rn.intellij.plugin.RnFileType"
+            implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFileType"
             fieldName="INSTANCE"
             language="RazomyNotation"
             extensions="rn;rl"/>
@@ -27,33 +27,33 @@
         <!-- Parser & AST -->
         <lang.parserDefinition
             language="RazomyNotation"
-            implementationClass="org.razomy.rn.intellij.plugin.RnParserDefinition"/>
+            implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnParserDefinition"/>
 
         <!-- Syntax Highlighting & Color Settings -->
         <lang.syntaxHighlighterFactory
             language="RazomyNotation"
-            implementationClass="org.razomy.rn.intellij.plugin.RnSyntaxHighlighterFactory"/>
+            implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnSyntaxHighlighterFactory"/>
         <colorSettingsPage
-            implementation="org.razomy.rn.intellij.plugin.RnColorSettingsPage"/>
+            implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnColorSettingsPage"/>
 
         <!-- Language Injection for Embedded Code Blocks (json", ts", sql", html", md", rn2", etc.) -->
         <multiHostInjector
-            implementation="org.razomy.rn.intellij.plugin.RnLanguageInjector"/>
+            implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnLanguageInjector"/>
 
         <!-- Code Folding & Commenter (# ) -->
         <lang.foldingBuilder
             language="RazomyNotation"
-            implementationClass="org.razomy.rn.intellij.plugin.RnFoldingBuilder"/>
+            implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFoldingBuilder"/>
         <lang.commenter
             language="RazomyNotation"
-            implementationClass="org.razomy.rn.intellij.plugin.RnCommenter"/>
+            implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnCommenter"/>
 
         <!-- ToolWindow with Export Buttons & Live Preview -->
         <toolWindow
             id="MyToolWindow"
             anchor="right"
             icon="/META-INF/pluginIcon.svg"
-            factoryClass="org.razomy.rn.intellij.plugin.MyToolWindowFactory"/>
+            factoryClass="org.razomy.rn.jetbrains.intellij.ide.plugin.MyToolWindowFactory"/>
 
         <!-- Notifications -->
         <notificationGroup
@@ -72,38 +72,38 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
 
             <action id="RazomyNotation.ExportJson"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToJsonAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToJsonAction"
                     text="Export to JSON (.json)"/>
             <action id="RazomyNotation.ExportYaml"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToYamlAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToYamlAction"
                     text="Export to YAML (.yaml)"/>
             <action id="RazomyNotation.ExportMarkdown"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToMarkdownAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToMarkdownAction"
                     text="Export to Markdown (.md)"/>
             <action id="RazomyNotation.ExportHtml"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToHtmlAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToHtmlAction"
                     text="Export to HTML (.html)"/>
             <action id="RazomyNotation.ExportSql"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToSqlAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToSqlAction"
                     text="Export to SQL (.sql)"/>
             <action id="RazomyNotation.ExportScss"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToScssAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToScssAction"
                     text="Export to SCSS (.scss)"/>
             <action id="RazomyNotation.ExportTerraform"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToTerraformAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToTerraformAction"
                     text="Export to Docker &amp; Terraform (.tf)"/>
             <action id="RazomyNotation.ExportProto"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToProtoAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToProtoAction"
                     text="Export to Protobuf (.proto)"/>
             <action id="RazomyNotation.ExportMermaid"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToMermaidAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToMermaidAction"
                     text="Export to Mermaid (.mmd)"/>
             <action id="RazomyNotation.ExportCsv"
-                    class="org.razomy.rn.intellij.plugin.ExportRnToCsvAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ExportRnToCsvAction"
                     text="Export to CSV (.csv)"/>
             <separator/>
             <action id="RazomyNotation.FormatRn"
-                    class="org.razomy.rn.intellij.plugin.FormatRnCanonicalAction"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.FormatRnCanonicalAction"
                     text="Format Canonical .rn (1-Space)"/>
         </group>
     </actions>

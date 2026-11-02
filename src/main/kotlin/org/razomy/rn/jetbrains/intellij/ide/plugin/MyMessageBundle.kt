@@ -1,4 +1,4 @@
-package org.razomy.rn.intellij.plugin
+package org.razomy.rn.jetbrains.intellij.ide.plugin
 
 import com.intellij.DynamicBundle
 import org.jetbrains.annotations.Nls

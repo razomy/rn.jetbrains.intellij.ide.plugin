@@ -1,10 +1,9 @@
-package org.razomy.rn.intellij.plugin
+package org.razomy.rn.jetbrains.intellij.ide.plugin
 
 import com.intellij.lang.ASTNode
 import com.intellij.lang.Commenter
 import com.intellij.lang.Language
 import com.intellij.lang.ParserDefinition
-import com.intellij.lang.PsiBuilder
 import com.intellij.lang.PsiParser
 import com.intellij.lang.folding.FoldingBuilderEx
 import com.intellij.lang.folding.FoldingDescriptor
@@ -17,7 +16,6 @@ import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.HighlighterColors
 import com.intellij.openapi.editor.colors.TextAttributesKey
-import com.intellij.openapi.editor.colors.TextAttributesKey.createTempTextAttributesKey
 import com.intellij.openapi.editor.colors.TextAttributesKey.createTextAttributesKey
 import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterBase
@@ -39,6 +37,7 @@ import com.intellij.psi.tree.IFileElementType
 import com.intellij.psi.tree.TokenSet
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.extapi.psi.PsiFileBase
+import com.intellij.openapi.vfs.VirtualFile
 import javax.swing.Icon
 
 class RnTokenType(debugName: String) : IElementType(debugName, RnLanguage)
@@ -517,7 +516,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
 }
 
 class RnSyntaxHighlighterFactory : SyntaxHighlighterFactory() {
-    override fun getSyntaxHighlighter(project: Project?, virtualFile: com.intellij.openapi.vfs.VirtualFile?): SyntaxHighlighter =
+    override fun getSyntaxHighlighter(project: Project?, virtualFile: VirtualFile?): SyntaxHighlighter =
         RnSyntaxHighlighter()
 }
 
