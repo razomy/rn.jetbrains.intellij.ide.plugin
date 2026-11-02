@@ -57,6 +57,7 @@ object RnTypes {
     @JvmField val COMMENT = RnTokenType("COMMENT")
     @JvmField val KEY = RnTokenType("KEY")
     @JvmField val SCHEMA_PORTAL = RnTokenType("SCHEMA_PORTAL")
+    @JvmField val SCHEMA_TYPE = RnTokenType("SCHEMA_TYPE")
     @JvmField val SYMBOL = RnTokenType("SYMBOL")
     @JvmField val TYPED_LITERAL = RnTokenType("TYPED_LITERAL")
     @JvmField val STRING = RnTokenType("STRING")
@@ -124,20 +125,22 @@ class RnLexer : LexerBase() {
             return
         }
 
-        // Homoiconic Comment: `# ` (inline) or `#` at EOL (indented block comment)
-        if (ch == '#' && isAtStartOfLineOrWhitespace(tokenStart)) {
+        // Homoiconic Comment: `# ` (inline) or `#` at EOL (indented block comment, including attached `Type#`)
+        if (ch == '#') {
             if (isEndOfLineHash(pos)) {
                 consumeBlockComment(pos)
                 return
             }
-            val nextCh = if (pos + 1 < endOffset) buffer[pos + 1] else '\n'
-            if (nextCh == ' ' || nextCh == '\t') {
-                while (pos < endOffset && buffer[pos] != '\n') {
-                    pos++
+            if (isAtStartOfLineOrWhitespace(tokenStart)) {
+                val nextCh = if (pos + 1 < endOffset) buffer[pos + 1] else '\n'
+                if (nextCh == ' ' || nextCh == '\t') {
+                    while (pos < endOffset && buffer[pos] != '\n') {
+                        pos++
+                    }
+                    tokenEnd = pos
+                    currentToken = RnTypes.COMMENT
+                    return
                 }
-                tokenEnd = pos
-                currentToken = RnTypes.COMMENT
-                return
             }
         }
 
@@ -157,8 +160,14 @@ class RnLexer : LexerBase() {
             return
         }
 
-        // Algebraic Composition Operators (` & `, ` ^ `, ` / `)
-        if ((ch == '&' || ch == '^' || ch == '/') && isSurroundedBySpace(pos)) {
+        // Algebraic Composition Operators (`&`, `^`, `/`) and Optional Schema Type Mark (`?`)
+        if ((ch == '&' || ch == '^' || ch == '/') && isAlgebraOperatorContext(pos)) {
+            pos++
+            tokenEnd = pos
+            currentToken = RnTypes.OPERATOR
+            return
+        }
+        if (ch == '?' && isOptionalMarkAfterType(pos)) {
             pos++
             tokenEnd = pos
             currentToken = RnTypes.OPERATOR
@@ -215,7 +224,19 @@ class RnLexer : LexerBase() {
         // Read word/token
         while (pos < endOffset) {
             val c = buffer[pos]
-            if (c.isWhitespace() || c == '[' || c == ']' || c == '{' || c == '}' || c == '(' || c == ')' || c == ',' || c == ';') {
+            if (c.isWhitespace() ||
+                c == '[' || c == ']' || c == '{' || c == '}' || c == '(' || c == ')' ||
+                c == ',' || c == ';'
+            ) {
+                break
+            }
+            if (c == '#' && isEndOfLineHash(pos)) {
+                break
+            }
+            if ((c == '&' || c == '^' || c == '/') && isAlgebraOperatorContext(pos)) {
+                break
+            }
+            if (c == '?' && isOptionalMarkAfterType(pos)) {
                 break
             }
             if (c == '"') {
@@ -239,6 +260,11 @@ class RnLexer : LexerBase() {
             pos++
         }
 
+        // Safety guard: guarantee forward progress so the lexer never emits a zero-length token
+        if (pos == tokenStart && pos < endOffset) {
+            pos++
+        }
+
         tokenEnd = pos
         val word = buffer.subSequence(tokenStart, tokenEnd).toString()
 
@@ -246,9 +272,11 @@ class RnLexer : LexerBase() {
             word == "true" || word == "false" || word == "None" ||
                     word in setOf("title", "subtitle", "part", "section", "topic", "quote") -> RnTypes.KEYWORD
             isNumberLiteral(word) -> RnTypes.NUMBER
-            // v0.3.0 Space Law: Type Constructor attaches directly to `[`, `{`, `(` with NO space (or with space in legacy)
-            isPascalCase(word) && isFollowedByBracketOnLine(tokenEnd) -> RnTypes.SCHEMA_PORTAL
-            isFirstTokenOnLine(tokenStart) -> RnTypes.KEY
+            // v0.3.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Int(1, 10){label "x"}`)
+            isPascalCase(word) && isDirectlyFollowedByPentad(tokenEnd) -> RnTypes.SCHEMA_PORTAL
+            // v0.3.0 Schema Type Definition (`Uuid{'pk}`, `Str?`, `Int(18, 120){default 18}`, `Uuid`)
+            isPascalCase(word) -> RnTypes.SCHEMA_TYPE
+            isKeyTokenPosition(tokenStart, tokenEnd) -> RnTypes.KEY
             else -> RnTypes.TEXT
         }
     }
@@ -335,6 +363,12 @@ class RnLexer : LexerBase() {
         while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t' || buffer[i] == '\r')) {
             i++
         }
+        if (i < endOffset && buffer[i] == '#') {
+            val nextCh = if (i + 1 < endOffset) buffer[i + 1] else '\n'
+            if (nextCh == ' ' || nextCh == '\t' || nextCh == '\r' || nextCh == '\n') {
+                return true
+            }
+        }
         return i >= endOffset || buffer[i] == '\n'
     }
 
@@ -342,31 +376,56 @@ class RnLexer : LexerBase() {
         return idx == 0 || buffer[idx - 1].isWhitespace()
     }
 
-    private fun isSurroundedBySpace(idx: Int): Boolean {
+    private fun isAlgebraOperatorContext(idx: Int): Boolean {
         val prevSpace = idx > startOffset && (buffer[idx - 1] == ' ' || buffer[idx - 1] == '\t')
         val nextSpace = idx + 1 < endOffset && (buffer[idx + 1] == ' ' || buffer[idx + 1] == '\t')
         return prevSpace && nextSpace
     }
 
-    private fun isFirstTokenOnLine(idx: Int): Boolean {
-        var i = idx - 1
+    private fun isOptionalMarkAfterType(idx: Int): Boolean {
+        if (idx <= startOffset) return false
+        var start = idx - 1
+        while (start >= startOffset && (buffer[start].isLetterOrDigit() || buffer[start] == '_')) {
+            start--
+        }
+        val wordStart = start + 1
+        if (wordStart >= idx) return false
+        val word = buffer.subSequence(wordStart, idx).toString()
+        return isPascalCase(word)
+    }
+
+    /**
+     * Matches `key_token` or `inline_tag_key` in the v0.3.0 grammar:
+     * - First token on a line (`unified_node`)
+     * - Field key inside `inline_form` / `attached_props` (`{key val, key2 val2}`)
+     * - Token after algebra operator (`& Mixin`, `/ debug`)
+     * - Inline stream child tag (`b[bold]`, `span{class x}[text]`)
+     */
+    private fun isKeyTokenPosition(startIdx: Int, endIdx: Int): Boolean {
+        // Inline child tag or attached props/slots: `b[bold]`, `div{class card}(slot)`
+        if (endIdx < endOffset && (buffer[endIdx] == '[' || buffer[endIdx] == '{' || buffer[endIdx] == '(')) {
+            return true
+        }
+        var i = startIdx - 1
         while (i >= startOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
             i--
         }
-        return i < startOffset || buffer[i] == '\n' || buffer[i] == '{'
+        if (i < startOffset || buffer[i] == '\n' || buffer[i] == '{') return true
+        if (buffer[i] == '&' || buffer[i] == '^' || buffer[i] == '/') return true
+        return false
     }
 
-    private fun isFollowedByBracketOnLine(afterIdx: Int): Boolean {
-        // Supports both attached `Sql(` (no space) and `Sql (`
-        var i = afterIdx
-        while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
-            i++
-        }
-        return i < endOffset && (buffer[i] == '{' || buffer[i] == '(' || buffer[i] == '[')
+    private fun isDirectlyFollowedByPentad(afterIdx: Int): Boolean {
+        return afterIdx < endOffset && (
+            buffer[afterIdx] == '{' ||
+            buffer[afterIdx] == '(' ||
+            buffer[afterIdx] == '[' ||
+            buffer[afterIdx] == '#'
+        )
     }
 
     private fun isPascalCase(s: String): Boolean {
-        return s.isNotEmpty() && s[0].isUpperCase() && s.all { it.isLetterOrDigit() || it == '_' }
+        return s.isNotEmpty() && s[0] in 'A'..'Z' && s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '_' }
     }
 
     private fun isNumberLiteral(s: String): Boolean {
@@ -539,6 +598,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
         val COMMENT = createTextAttributesKey("RN_COMMENT", DefaultLanguageHighlighterColors.LINE_COMMENT)
         val KEY = createTextAttributesKey("RN_KEY", DefaultLanguageHighlighterColors.INSTANCE_FIELD)
         val SCHEMA_PORTAL = createTextAttributesKey("RN_SCHEMA_PORTAL", DefaultLanguageHighlighterColors.CLASS_NAME)
+        val SCHEMA_TYPE = createTextAttributesKey("RN_SCHEMA_TYPE", DefaultLanguageHighlighterColors.CLASS_REFERENCE)
         val SYMBOL = createTextAttributesKey("RN_SYMBOL", DefaultLanguageHighlighterColors.CONSTANT)
         val TYPED_LITERAL = createTextAttributesKey("RN_TYPED_LITERAL", DefaultLanguageHighlighterColors.METADATA)
         val STRING = createTextAttributesKey("RN_STRING", DefaultLanguageHighlighterColors.STRING)
@@ -558,6 +618,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
             RnTypes.COMMENT -> pack(COMMENT)
             RnTypes.KEY -> pack(KEY)
             RnTypes.SCHEMA_PORTAL -> pack(SCHEMA_PORTAL)
+            RnTypes.SCHEMA_TYPE -> pack(SCHEMA_TYPE)
             RnTypes.SYMBOL -> pack(SYMBOL)
             RnTypes.TYPED_LITERAL -> pack(TYPED_LITERAL)
             RnTypes.STRING -> pack(STRING)
@@ -978,33 +1039,33 @@ class RnColorSettingsPage : ColorSettingsPage {
     private val descriptors = arrayOf(
         AttributesDescriptor("Comment (# )", RnSyntaxHighlighter.COMMENT),
         AttributesDescriptor("Key / Tag Name", RnSyntaxHighlighter.KEY),
-        AttributesDescriptor("Type Constructor (Sql, Html, Scss, Md)", RnSyntaxHighlighter.SCHEMA_PORTAL),
+        AttributesDescriptor("Attached Type Constructor (Sql(, Html[, Scss{)", RnSyntaxHighlighter.SCHEMA_PORTAL),
+        AttributesDescriptor("Schema Type Definition (Uuid, Int, Str?)", RnSyntaxHighlighter.SCHEMA_TYPE),
         AttributesDescriptor("Symbol ('pk, 'GET)", RnSyntaxHighlighter.SYMBOL),
         AttributesDescriptor("Typed Literal (Date\"...\")", RnSyntaxHighlighter.TYPED_LITERAL),
         AttributesDescriptor("String", RnSyntaxHighlighter.STRING),
         AttributesDescriptor("Column-0 Raw String", RnSyntaxHighlighter.COL0_RAW),
         AttributesDescriptor("Number", RnSyntaxHighlighter.NUMBER),
         AttributesDescriptor("Keyword / Boolean / None", RnSyntaxHighlighter.KEYWORD),
-        AttributesDescriptor("Algebra Operator (&, ^, /)", RnSyntaxHighlighter.OPERATOR),
+        AttributesDescriptor("Algebra & Optional Operator (&, ^, /, ?)", RnSyntaxHighlighter.OPERATOR),
         AttributesDescriptor("Symmetric Pentad Bracket ([], {}, ())", RnSyntaxHighlighter.BRACKET)
     )
 
     override fun getIcon(): Icon = RnIcons.FILE
     override fun getHighlighter(): SyntaxHighlighter = RnSyntaxHighlighter()
     override fun getDemoText(): String = """
-        # Razomy Notation (.rn) v0.3.0 Sample
+        # Razomy Notation (.rn) v0.3.0 — Universal Node & Schema Sample
         #
-         Multiline block comment!
+         Multiline block comment (5th Pentad member)!
          Auto-closed on dedent with zero '#' on inner lines.
-        cluster.primary.database {
-         engine postgres
-         port 5432
-         tls true
+        User{table "users"}(1, 2) & Auditable / debug {
+         id Uuid{'pk}
+         age Int(18, 120){default 18}
+         bio Str?
+         created_at Date"2026-03-30"
          fallback None
-         created_at Date"12.12.23"
-         role 'pk
-         welcome_msg 1"
-        Line 1 starts at Column 0!
+         welcome_msg Ts1"
+        const greeting: string = "Column-0 Raw String!";
         "1
         
         users_schema (
@@ -1013,13 +1074,13 @@ class RnColorSettingsPage : ColorSettingsPage {
          org_id, Uuid, Orgs.id,    None
          role,   Text, 'not_null,  member
         
-        UserCard & BaseCard / debug {
+        UserCard & BaseCard {
          query Sql(
           select, from,  where
           "*",    users, "id = :id"
          view Html[
           div{class card} [
-           h2 [ User Profile
+           p [ Hello b[bold] and `code`!
     """.trimIndent()
 
     override fun getAdditionalHighlightingTagToDescriptorMap(): Map<String, TextAttributesKey>? = null
@@ -1222,10 +1283,28 @@ class RnVisualNumberingHintsProvider : InlayHintsProvider<NoSettings> {
         }
         if (headerLineIdx == -1) return
 
-        // Add subtle `cols` hint or start numbering from the row AFTER the header
-        var rowNumber = 0
-        val padWidth = (endLine - headerLineIdx).toString().length.coerceAtLeast(1)
+        // Count actual data rows to compute exact digit padding width
+        var totalDataRows = 0
+        for (l in (headerLineIdx + 1)..endLine) {
+            val s = document.getLineStartOffset(l)
+            val e = document.getLineEndOffset(l)
+            val lineStr = text.subSequence(s, e).toString()
+            val trimmed = lineStr.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            if (getIndent(lineStr) == rowIndent && hasTopLevelComma(trimmed)) {
+                totalDataRows++
+            }
+        }
+        if (totalDataRows == 0) return
 
+        val padWidth = totalDataRows.toString().length.coerceAtLeast(1)
+
+        // Add matching-width `#` badge on the header row so header and data columns align vertically
+        val headerStartOffset = document.getLineStartOffset(headerLineIdx)
+        val headerLabel = "${"#".padStart(padWidth, ' ')}. "
+        addBadge(sink, factory, headerStartOffset + rowIndent, headerLabel)
+
+        var rowNumber = 0
         for (l in (headerLineIdx + 1)..endLine) {
             val s = document.getLineStartOffset(l)
             val e = document.getLineEndOffset(l)

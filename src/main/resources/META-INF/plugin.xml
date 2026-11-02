@@ -4,11 +4,12 @@
     <vendor url="https://razomy.org">Razomy</vendor>
 
     <description><![CDATA[
-        Full language support for <b>Razomy Notation (<code>.rn</code>)</b> v0.1.0 — Layer 0 Universal Stream Root,
-        Symmetric Triad (<code>[]</code> Stream, <code>{}</code> Form, <code>()</code> Tuple),
-        Schema Portals (<code>Sql</code>, <code>Html</code>, <code>Scss</code>, <code>Md</code>),
+        Full language support for <b>Razomy Notation (<code>.rn</code>)</b> v0.3.0 — Layer 0 Universal Node &amp; Schema Notation:
+        Symmetric Pentad (<code>[]</code> Stream, <code>{}</code> Form, <code>()</code> Tuple, <code>""</code> Scalar/Col-0 String, <code>#</code> Comment),
+        Attached Props &amp; Slots (<code>Key{Props}(Slots)</code>), Attached Type Constructors (<code>Sql(</code>, <code>Html[</code>, <code>Scss{</code>, <code>Date"..."</code>),
+        Schema Type Definitions (<code>Uuid{'pk}</code>, <code>Int(18, 120)</code>, <code>Str?</code>),
         Column-0 Multiline Raw Strings, Algebraic Composition (<code>&amp;</code>, <code>^</code>, <code>/</code>),
-        and one-click multi-format file exporting (JSON, YAML, Markdown, HTML, SQL, SCSS, Terraform/Docker, Protobuf, Mermaid, CSV).
+        2D Table Formatter, Visual Auto-Numbering Inlay Hints, and multi-format file exporting.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
