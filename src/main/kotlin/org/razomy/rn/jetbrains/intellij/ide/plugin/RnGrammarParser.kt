@@ -54,6 +54,163 @@ object RnGrammarParser {
     }
 
     /**
+     * Standard Built-in Type Constructors & Schema Archetypes in Razomy Notation v1.0.0.
+     */
+    val BUILTIN_SCALAR_AND_SCHEMA_TYPES: Set<String> = setOf(
+        "Str", "String", "Text",
+        "Int", "Integer", "Long",
+        "Float", "Double", "Num", "Number", "Dec", "Decimal",
+        "Bool", "Boolean",
+        "Uuid", "Email", "Url", "Uri", "Regex",
+        "Date", "DateTime", "Timestamp", "Time", "Duration",
+        "Usd", "Eur", "Uah", "Gbp", "Jpy", "Cny", "Chf", "Cad", "Aud", "Pln",
+        "Km", "M", "Cm", "Mm", "Kg", "G", "Ms", "Sec", "Min", "Hr", "Pct", "Px", "Rem",
+        "Ver", "Semver",
+        "Enum", "List", "Set", "Map", "Tuple", "Any", "Object", "Optional",
+        "Md", "Sql", "Html", "Xml", "Scss", "Css", "Json", "Yaml", "Toml",
+        "Ts", "Js", "Rs", "Py", "Kt", "Java", "Go", "Sh", "Bash", "Tf", "Proto", "Csv", "Mmd", "Pest",
+        "Rn", "Rn1", "Rn2", "Rl"
+    )
+
+    val CURRENCY_AND_UNIT_PREFIXES: Set<String> = setOf(
+        "Usd", "Eur", "Uah", "Gbp", "Jpy", "Cny", "Chf", "Cad", "Aud", "Pln",
+        "Km", "Cm", "Mm", "Kg", "Ms", "Sec", "Pct", "Px", "Rem", "Ver", "Semver"
+    )
+
+    /**
+     * Standardized Multilingual Markdown (`Md`) Keywords for Top 20 World Languages + Ukrainian (`uk`).
+     */
+    object I18nMdKeywords {
+        val TITLE_H1 = setOf(
+            "title", "h1",
+            "заголовок", // uk, ru
+            "titulo", "título", // es, pt
+            "标题", // zh
+            "शीर्षक", // hi
+            "عنوان", // ar, fa
+            "শিরোনাম", // bn
+            "titre", // fr
+            "titel", // de, nl
+            "タイトル", // ja
+            "제목", // ko
+            "titolo", // it
+            "baslik", "başlık", // tr
+            "tieude", "tiêu_đề", // vi
+            "tytul", "tytuł", // pl
+            "judul", // id
+            "หัวข้อ" // th
+        )
+
+        val PART_H2 = setOf(
+            "part", "subtitle", "h2",
+            "частина", "підзаголовок", // uk
+            "часть", "подзаголовок", // ru
+            "parte", // es, pt, it
+            "部分", // zh
+            "भाग", // hi
+            "جزء", // ar
+            "অংশ", // bn
+            "partie", // fr
+            "teil", // de
+            "部", // ja
+            "파트", // ko
+            "bolum", "bölüm", // tr
+            "phan", "phần", // vi
+            "czesc", "część", // pl
+            "deel", // nl
+            "bagian", // id
+            "ส่วน", // th
+            "بخش" // fa
+        )
+
+        val SECTION_H3 = setOf(
+            "section", "h3",
+            "розділ", // uk
+            "раздел", // ru
+            "seccion", "sección", // es
+            "secao", "seção", // pt
+            "章节", // zh
+            "अनुभाग", // hi
+            "قسم", // ar
+            "বিভাগ", // bn
+            "abschnitt", // de
+            "節", // ja
+            "섹션", // ko
+            "sezione", // it
+            "kisim", "kısım", // tr
+            "muc", "mục", // vi
+            "sekcja", // pl
+            "sectie", // nl
+            "bab", // id
+            "หมวด", // th
+            "فصل" // fa
+        )
+
+        val TOPIC_H4 = setOf(
+            "topic", "h4",
+            "тема", // uk, ru, es
+            "topico", "tópico", // pt
+            "主题", // zh
+            "विषय", // hi
+            "موضوع", // ar, fa
+            "বিষয়", // bn
+            "sujet", // fr
+            "thema", // de
+            "トピック", // ja
+            "주제", // ko
+            "argomento", // it
+            "konu", // tr
+            "chude", "chủ_đề", // vi
+            "temat", // pl
+            "onderwerp", // nl
+            "topik", // id
+            "ประเด็น" // th
+        )
+
+        val UL_LIST = setOf(
+            "ul", "список", "lista", "列表", "सूची", "قائمة", "তালিকা", "liste",
+            "リスト", "목록", "danhsach", "lijst", "daftar", "รายการ", "فهرست"
+        )
+
+        val OL_LIST = setOf(
+            "ol", "нум", "num", "编号", "क्रम", "ترقيم", "ক্রম",
+            "番号", "번호", "stt", "urut", "ลำดับ", "شماره"
+        )
+
+        val QUOTE = setOf(
+            "quote", "цитата", "cita", "citacao", "citação", "引用", "उद्धरण", "اقتباس",
+            "উদ্ধৃতি", "citation", "zitat", "인용", "citazione", "alinti", "alıntı",
+            "trichdan", "cytat", "citaat", "kutipan", "อ้างอิง", "نقل"
+        )
+
+        val NOTE = setOf(
+            "note", "примітка", "заметка", "nota", "注意", "टिप्पणी", "ملاحظة",
+            "নোট", "hinweis", "注記", "참고", "not", "ghichu", "notatka", "notitie",
+            "catatan", "หมายเหตุ", "یادداشت"
+        )
+
+        val WARN = setOf(
+            "warn", "увага", "внимание", "aviso", "警告", "चेतावनी", "تحذير",
+            "সতর্কতা", "alerte", "warnung", "경고", "uyari", "uyarı", "canhbao",
+            "uwaga", "waarschuwing", "peringatan", "คำเตือน", "هشدار"
+        )
+
+        val ALL_DOCUMENT_KEYWORDS: Set<String> =
+            TITLE_H1 + PART_H2 + SECTION_H3 + TOPIC_H4 + UL_LIST + OL_LIST + QUOTE + NOTE + WARN +
+                    setOf("h5", "h6", "meta", "example", "code", "код", "table", "таблиця", "таблица")
+
+        fun getHeadingLevel(word: String): Int = when (word.lowercase()) {
+            in TITLE_H1 -> 1
+            in PART_H2 -> 2
+            in SECTION_H3 -> 3
+            in TOPIC_H4 -> 4
+            "h5" -> 5
+            "h6" -> 6
+            else -> 0
+        }
+    }
+
+    /**
      * Splits a 2D table row by top-level `,` into exactly the expected number of columns (`expectedCols`).
      *
      * Fixes the bug where unquoted descriptions in the last column (e.g. in `vocabulary (` where
@@ -430,17 +587,76 @@ object RnGrammarParser {
         return null
     }
 
-    private data class SchemaFieldSpec(
+    data class SchemaFieldSpec(
         val fieldName: String,
         val baseType: String,
         val optional: Boolean,
         val min: Double? = null,
         val max: Double? = null,
+        val pattern: String? = null,
         val enumValues: Set<String> = emptySet(),
         val hasDefault: Boolean = false
     )
 
-    fun validateSchemasInDocument(text: String): List<RnDiagnostic> {
+    /**
+     * Extracts all PascalCase Schema Definitions (`UserForm { ... }`) from a `.rn` text.
+     */
+    fun extractSchemasFromText(text: String): Map<String, Map<String, SchemaFieldSpec>> {
+        val lines = text.split("\n")
+        val schemas = mutableMapOf<String, Map<String, SchemaFieldSpec>>()
+        var i = 0
+        while (i < lines.size) {
+            val rawLine = lines[i]
+            val trimmedRight = rawLine.trimEnd('\r', ' ', '\t')
+            val col0Rank = detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                i++
+                while (i < lines.size && lines[i].trimEnd('\r', ' ', '\t') != closeMarker) {
+                    i++
+                }
+                i++
+                continue
+            }
+
+            val cleanEnd = stripInlineComment(trimmedRight).trimEnd()
+            if (cleanEnd.endsWith("{")) {
+                val indent = getIndent(rawLine)
+                val header = cleanEnd.dropLast(1).trim()
+                val parts = header.split(Regex("\\s+"))
+                if (parts.size == 1 && isPascalCase(parts[0])) {
+                    val schemaName = parts[0]
+                    val blockEnd = findBlockEnd(lines, i, indent)
+                    val fields = mutableMapOf<String, SchemaFieldSpec>()
+                    for (sub in (i + 1)..blockEnd) {
+                        val subRaw = lines[sub]
+                        val subLine = stripInlineComment(subRaw).trim()
+                        if (subLine.isEmpty() || subLine.startsWith("#")) continue
+                        if (getIndent(subRaw) <= indent || getIndent(subRaw) > indent + 2) continue
+                        val fieldKey = subLine.takeWhile { !it.isWhitespace() && it != '{' && it != '(' }
+                        val rest = subLine.substring(fieldKey.length).trim()
+                        if (fieldKey.isNotEmpty() && rest.isNotEmpty()) {
+                            parseSchemaFieldSpec(fieldKey, rest)?.let { fields[fieldKey] = it }
+                        }
+                    }
+                    if (fields.isNotEmpty()) {
+                        schemas[schemaName] = fields
+                    }
+                }
+            }
+            i++
+        }
+        return schemas
+    }
+
+    /**
+     * Validates schemas, typed instances, unknown types, forbidden `?` operator, and `meta { schema ... }` rules.
+     * Accepts optional `externalSchemas` resolved from sibling/imported project `.rn` files.
+     */
+    fun validateSchemasInDocument(
+        text: String,
+        externalSchemas: Map<String, Map<String, SchemaFieldSpec>> = emptyMap()
+    ): List<RnDiagnostic> {
         val diagnostics = mutableListOf<RnDiagnostic>()
         val lines = text.split("\n")
         val lineOffsets = IntArray(lines.size)
@@ -451,132 +667,295 @@ object RnGrammarParser {
         }
 
         val schemas = mutableMapOf<String, Map<String, SchemaFieldSpec>>()
+        schemas.putAll(externalSchemas)
+        schemas.putAll(extractSchemasFromText(text))
 
-        for (i in lines.indices) {
-            val rawLine = lines[i]
-            val cleanEnd = stripInlineComment(rawLine.trimEnd('\r', ' ', '\t')).trimEnd()
-            if (!cleanEnd.endsWith("{")) continue
-
-            val indent = getIndent(rawLine)
-            val header = cleanEnd.dropLast(1).trim()
-            val parts = header.split(Regex("\\s+"))
-
-            if (parts.size == 1 && isPascalCase(parts[0])) {
-                val schemaName = parts[0]
-                val blockEnd = findBlockEnd(lines, i, indent)
-                val fields = mutableMapOf<String, SchemaFieldSpec>()
-                for (sub in (i + 1)..blockEnd) {
-                    val subRaw = lines[sub]
-                    val subLine = stripInlineComment(subRaw).trim()
-                    if (subLine.isEmpty() || subLine.startsWith("#")) continue
-                    if (getIndent(subRaw) <= indent || getIndent(subRaw) > indent + 2) continue
-                    val fieldKey = subLine.takeWhile { !it.isWhitespace() && it != '{' && it != '(' }
-                    val rest = subLine.substring(fieldKey.length).trim()
-                    if (fieldKey.isNotEmpty() && rest.isNotEmpty()) {
-                        parseSchemaFieldSpec(fieldKey, rest)?.let { fields[fieldKey] = it }
-                    }
-                }
-                if (fields.isNotEmpty()) {
-                    schemas[schemaName] = fields
-                }
-            } else if (parts.size >= 2) {
-                val typeName = parts.last()
-                val schemaFields = schemas[typeName] ?: continue
-                val blockEnd = findBlockEnd(lines, i, indent)
-                val providedKeys = mutableSetOf<String>()
-
-                for (sub in (i + 1)..blockEnd) {
-                    val subRaw = lines[sub]
-                    val subTrimmed = stripInlineComment(subRaw).trim()
-                    if (subTrimmed.isEmpty() || subTrimmed.startsWith("#")) continue
-                    val subIndent = getIndent(subRaw)
-                    if (subIndent <= indent) break
-                    if (subIndent > indent + 2) continue
-
-                    val k = subTrimmed.takeWhile { !it.isWhitespace() && it != '{' && it != '(' }
-                    val v = subTrimmed.substring(k.length).trim()
-                    providedKeys.add(k)
-
-                    val spec = schemaFields[k]
-                    if (spec == null) {
-                        diagnostics.add(
-                            RnDiagnostic(
-                                sub,
-                                lineOffsets[sub] + subIndent,
-                                lineOffsets[sub] + subRaw.length,
-                                "Schema '$typeName': Unknown field '$k'",
-                                RnDiagnostic.Severity.WARNING
-                            )
-                        )
-                    } else {
-                        val err = checkFieldValue(v, spec)
-                        if (err != null) {
+        // Check if `meta { schema SomeSchema }` is declared at top of file
+        var fileDefaultSchema: String? = null
+        if (lines.isNotEmpty() && stripInlineComment(lines[0]).trim() == "meta {") {
+            val metaEnd = findBlockEnd(lines, 0, getIndent(lines[0]))
+            for (m in 1..metaEnd) {
+                val mLine = stripInlineComment(lines[m]).trim()
+                if (mLine.startsWith("schema ")) {
+                    val rawRef = mLine.removePrefix("schema").trim().removeSurrounding("\"")
+                    val targetSchema = rawRef.substringAfterLast('#').substringAfterLast('/').removeSuffix(".rn")
+                    if (isPascalCase(targetSchema)) {
+                        fileDefaultSchema = targetSchema
+                        if (targetSchema !in schemas && targetSchema !in BUILTIN_SCALAR_AND_SCHEMA_TYPES) {
                             diagnostics.add(
                                 RnDiagnostic(
-                                    sub,
-                                    lineOffsets[sub] + subIndent,
-                                    lineOffsets[sub] + subRaw.length,
-                                    "Schema '$typeName.$k': $err",
+                                    m,
+                                    lineOffsets[m] + getIndent(lines[m]),
+                                    lineOffsets[m] + lines[m].length,
+                                    "Unknown schema '$targetSchema' referenced in meta block",
                                     RnDiagnostic.Severity.ERROR
                                 )
                             )
                         }
                     }
                 }
+            }
+        }
 
-                for ((reqKey, spec) in schemaFields) {
-                    if (!spec.optional && !spec.hasDefault && reqKey !in providedKeys) {
+        var i = 0
+        while (i < lines.size) {
+            val rawLine = lines[i]
+            val trimmedRight = rawLine.trimEnd('\r', ' ', '\t')
+
+            // Skip Column-0 Raw Multiline Strings so embedded examples/code are not falsely flagged
+            val col0Rank = detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                i++
+                while (i < lines.size && lines[i].trimEnd('\r', ' ', '\t') != closeMarker) {
+                    i++
+                }
+                i++
+                continue
+            }
+
+            // Skip Block Comments
+            if (trimmedRight.trim() == "#") {
+                val baseIndent = getIndent(rawLine)
+                i++
+                while (i < lines.size) {
+                    if (lines[i].isNotBlank() && getIndent(lines[i]) <= baseIndent) break
+                    i++
+                }
+                continue
+            }
+
+            val cleanEnd = stripInlineComment(trimmedRight).trimEnd()
+            if (cleanEnd.isEmpty() || cleanEnd.startsWith("#")) {
+                i++
+                continue
+            }
+
+            val indent = getIndent(rawLine)
+
+            // Forbid `Type?` syntax everywhere and suggest `& Optional`
+            val forbiddenQMatch = Regex("""\b([A-Z][A-Za-z0-9_]*)\?""").find(cleanEnd)
+            if (forbiddenQMatch != null) {
+                val typeName = forbiddenQMatch.groupValues[1]
+                diagnostics.add(
+                    RnDiagnostic(
+                        i,
+                        lineOffsets[i] + indent,
+                        lineOffsets[i] + rawLine.length,
+                        "Operator '?' ('$typeName?') is not used in Razomy Notation. Use '$typeName & Optional' instead.",
+                        RnDiagnostic.Severity.ERROR
+                    )
+                )
+            }
+
+            if (cleanEnd.endsWith("{")) {
+                val header = cleanEnd.dropLast(1).trim()
+                val parts = header.split(Regex("\\s+"))
+                val blockEnd = findBlockEnd(lines, i, indent)
+
+                if (parts.size >= 2 && parts[1] != "&" && parts[1] != "^" && parts[1] != "/") {
+                    val rawTypeToken = parts.last()
+                    val resolvedType = rawTypeToken.substringAfterLast('#')
+                    if (isPascalCase(resolvedType)) {
+                        val schemaFields = schemas[resolvedType]
+                        if (schemaFields != null) {
+                            validateInstanceAgainstSchema(
+                                lines, i, blockEnd, indent, resolvedType, schemaFields, lineOffsets, diagnostics
+                            )
+                        } else if (resolvedType !in BUILTIN_SCALAR_AND_SCHEMA_TYPES) {
+                            diagnostics.add(
+                                RnDiagnostic(
+                                    i,
+                                    lineOffsets[i] + indent,
+                                    lineOffsets[i] + rawLine.length,
+                                    "Unknown type or schema '$resolvedType'. Define '$resolvedType {' or use a standard type.",
+                                    RnDiagnostic.Severity.ERROR
+                                )
+                            )
+                        }
+                    } else if (rawTypeToken.all { it.isLetterOrDigit() || it == '_' }) {
                         diagnostics.add(
                             RnDiagnostic(
                                 i,
                                 lineOffsets[i] + indent,
                                 lineOffsets[i] + rawLine.length,
-                                "Schema '$typeName': Missing required field '$reqKey' (${spec.baseType})",
+                                "Invalid type constructor '$rawTypeToken': Type names must be PascalCase (e.g. UserForm{)",
                                 RnDiagnostic.Severity.ERROR
                             )
                         )
                     }
+                } else if (parts.size == 1 && !isPascalCase(parts[0]) && parts[0] !in setOf("meta", "example")) {
+                    // Untyped block e.g. `valid_user {`: check if `fileDefaultSchema` is active OR if its keys match a defined schema in this file!
+                    val nodeName = parts[0]
+                    val targetSchemaName = fileDefaultSchema ?: inferMatchingSchemaForUntypedBlock(
+                        lines, i, blockEnd, indent, schemas
+                    )
+                    if (targetSchemaName != null && schemas.containsKey(targetSchemaName)) {
+                        diagnostics.add(
+                            RnDiagnostic(
+                                i,
+                                lineOffsets[i] + indent,
+                                lineOffsets[i] + rawLine.length,
+                                "Missing schema type '$targetSchemaName' on node '$nodeName'. Write '$nodeName $targetSchemaName{' to validate.",
+                                RnDiagnostic.Severity.WARNING
+                            )
+                        )
+                        validateInstanceAgainstSchema(
+                            lines, i, blockEnd, indent, targetSchemaName, schemas[targetSchemaName]!!, lineOffsets, diagnostics
+                        )
+                    }
+                }
+            }
+            i++
+        }
+        return diagnostics
+    }
+
+    private fun inferMatchingSchemaForUntypedBlock(
+        lines: List<String>,
+        openLine: Int,
+        blockEnd: Int,
+        indent: Int,
+        schemas: Map<String, Map<String, SchemaFieldSpec>>
+    ): String? {
+        if (schemas.isEmpty() || indent > 0) return null
+        val childKeys = mutableSetOf<String>()
+        for (sub in (openLine + 1)..blockEnd) {
+            val subRaw = lines[sub]
+            val subTrimmed = stripInlineComment(subRaw).trim()
+            if (subTrimmed.isEmpty() || subTrimmed.startsWith("#")) continue
+            val subIndent = getIndent(subRaw)
+            if (subIndent <= indent) break
+            if (subIndent > indent + 2) continue
+            val k = subTrimmed.takeWhile { !it.isWhitespace() && it != '{' && it != '(' }
+            if (k.isNotEmpty()) childKeys.add(k)
+        }
+        if (childKeys.size < 2) return null
+        for ((schemaName, fields) in schemas) {
+            val matchCount = childKeys.count { it in fields }
+            if (matchCount >= 2 && matchCount >= childKeys.size / 2) {
+                return schemaName
+            }
+        }
+        return null
+    }
+
+    private fun validateInstanceAgainstSchema(
+        lines: List<String>,
+        openLine: Int,
+        blockEnd: Int,
+        indent: Int,
+        typeName: String,
+        schemaFields: Map<String, SchemaFieldSpec>,
+        lineOffsets: IntArray,
+        diagnostics: MutableList<RnDiagnostic>
+    ) {
+        val providedKeys = mutableSetOf<String>()
+        for (sub in (openLine + 1)..blockEnd) {
+            val subRaw = lines[sub]
+            val subTrimmed = stripInlineComment(subRaw).trim()
+            if (subTrimmed.isEmpty() || subTrimmed.startsWith("#")) continue
+            val subIndent = getIndent(subRaw)
+            if (subIndent <= indent) break
+            if (subIndent > indent + 2) continue
+
+            val k = subTrimmed.takeWhile { !it.isWhitespace() && it != '{' && it != '(' }
+            val v = subTrimmed.substring(k.length).trim()
+            providedKeys.add(k)
+
+            val spec = schemaFields[k]
+            if (spec == null) {
+                diagnostics.add(
+                    RnDiagnostic(
+                        sub,
+                        lineOffsets[sub] + subIndent,
+                        lineOffsets[sub] + subRaw.length,
+                        "Schema '$typeName': Unknown field '$k'",
+                        RnDiagnostic.Severity.WARNING
+                    )
+                )
+            } else {
+                val err = checkFieldValue(v, spec)
+                if (err != null) {
+                    diagnostics.add(
+                        RnDiagnostic(
+                            sub,
+                            lineOffsets[sub] + subIndent,
+                            lineOffsets[sub] + subRaw.length,
+                            "Schema '$typeName.$k': $err",
+                            RnDiagnostic.Severity.ERROR
+                        )
+                    )
                 }
             }
         }
-        return diagnostics
+
+        for ((reqKey, spec) in schemaFields) {
+            if (!spec.optional && !spec.hasDefault && reqKey !in providedKeys) {
+                diagnostics.add(
+                    RnDiagnostic(
+                        openLine,
+                        lineOffsets[openLine] + indent,
+                        lineOffsets[openLine] + lines[openLine].length,
+                        "Schema '$typeName': Missing required field '$reqKey' (${spec.baseType})",
+                        RnDiagnostic.Severity.ERROR
+                    )
+                )
+            }
+        }
     }
 
     private fun parseSchemaFieldSpec(fieldName: String, rest: String): SchemaFieldSpec? {
         if (rest == "{") {
             return SchemaFieldSpec(fieldName, "Object", optional = false)
         }
-        val baseTypeRaw = rest.takeWhile { it.isLetterOrDigit() || it == '_' || it == '?' }
-        if (baseTypeRaw.isEmpty() || !isPascalCase(baseTypeRaw.removeSuffix("?"))) return null
-        val optional = baseTypeRaw.endsWith("?") || rest.contains("default None")
-        val baseType = baseTypeRaw.removeSuffix("?")
+        val baseTypeRaw = rest.takeWhile { it.isLetterOrDigit() || it == '_' }
+        if (baseTypeRaw.isEmpty() || !isPascalCase(baseTypeRaw)) return null
+        val optional = rest.contains("& Optional") || rest.contains("default None")
         val hasDefault = rest.contains("default ")
 
         var min: Double? = null
         var max: Double? = null
+        var pattern: String? = null
         val enumVals = mutableSetOf<String>()
 
+        // 1. Parse explicit `{min 3, max 20, min_items 1, max_items 5, pattern Regex"^[a-z0-9_]+$"}` props
+        val braceStart = rest.indexOf('{')
+        val braceEnd = rest.lastIndexOf('}')
+        if (braceStart >= 0 && braceEnd > braceStart) {
+            val propsBody = rest.substring(braceStart + 1, braceEnd)
+            Regex("""\b(?:min|min_items|min_length)\s+(-?\d+(?:\.\d+)?)""").find(propsBody)?.let {
+                min = it.groupValues[1].toDoubleOrNull()
+            }
+            Regex("""\b(?:max|max_items|max_length)\s+(-?\d+(?:\.\d+)?)""").find(propsBody)?.let {
+                max = it.groupValues[1].toDoubleOrNull()
+            }
+            Regex("""\bpattern\s+(?:Regex)?"([^"]+)"""").find(propsBody)?.let {
+                pattern = it.groupValues[1]
+            }
+        }
+
+        // 2. Parse `(Slots)` for `Enum('admin, 'editor)` or `List(Str)` (and legacy numeric slots if present)
         val parenStart = rest.indexOf('(')
         val parenEnd = rest.indexOf(')', parenStart + 1)
-        if (parenStart >= 0 && parenEnd > parenStart) {
+        if (parenStart >= 0 && parenEnd > parenStart && (braceStart < 0 || parenStart < braceStart)) {
             val inside = rest.substring(parenStart + 1, parenEnd)
             val args = inside.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            if (baseType == "Enum") {
+            if (baseTypeRaw == "Enum") {
                 enumVals.addAll(args)
-            } else if (args.size >= 2) {
+            } else if (min == null && args.size >= 2 && args[0].toDoubleOrNull() != null) {
                 min = args[0].toDoubleOrNull()
                 max = args[1].toDoubleOrNull()
-            } else if (args.size == 1) {
-                min = args[0].toDoubleOrNull()
             }
         }
 
         return SchemaFieldSpec(
             fieldName = fieldName,
-            baseType = baseType,
+            baseType = baseTypeRaw,
             optional = optional,
             min = min,
             max = max,
+            pattern = pattern,
             enumValues = enumVals,
             hasDefault = hasDefault
         )
@@ -584,18 +963,36 @@ object RnGrammarParser {
 
     private fun checkFieldValue(rawVal: String, spec: SchemaFieldSpec): String? {
         if (rawVal.isEmpty() || rawVal == "None") {
-            return if (spec.optional || spec.hasDefault) null else "Field cannot be None"
+            return if (spec.optional || spec.hasDefault) null else "Field cannot be None (add '& Optional' to schema if optional)"
         }
         val cleanStr = rawVal.removeSurrounding("\"")
         return when (spec.baseType) {
-            "Int", "Integer" -> {
+            "Int", "Integer", "Long" -> {
                 val n = rawVal.toLongOrNull() ?: return "Expected Int, got '$rawVal'"
                 if (spec.min != null && n < spec.min) return "Value $n is less than minimum ${spec.min.toInt()}"
                 if (spec.max != null && n > spec.max) return "Value $n exceeds maximum ${spec.max.toInt()}"
                 null
             }
-            "Float", "Num", "Number", "Decimal" -> {
+            "Float", "Double", "Num", "Number", "Dec", "Decimal" -> {
                 val n = rawVal.toDoubleOrNull() ?: return "Expected Number, got '$rawVal'"
+                if (spec.min != null && n < spec.min) return "Value $n is less than minimum ${spec.min}"
+                if (spec.max != null && n > spec.max) return "Value $n exceeds maximum ${spec.max}"
+                null
+            }
+            in CURRENCY_AND_UNIT_PREFIXES -> {
+                val stripped = if (rawVal.startsWith(spec.baseType)) {
+                    rawVal.removePrefix(spec.baseType).removeSurrounding("\"")
+                } else {
+                    rawVal
+                }
+                if (spec.baseType == "Ver" || spec.baseType == "Semver") {
+                    if (!stripped.matches(Regex("""\d+(\.\d+)+.*"""))) {
+                        return "Expected ${spec.baseType} version (e.g. ${spec.baseType}1.0.0), got '$rawVal'"
+                    }
+                    return null
+                }
+                val n = stripped.toDoubleOrNull()
+                    ?: return "Expected ${spec.baseType} number (e.g. ${spec.baseType}123.46), got '$rawVal'"
                 if (spec.min != null && n < spec.min) return "Value $n is less than minimum ${spec.min}"
                 if (spec.max != null && n > spec.max) return "Value $n exceeds maximum ${spec.max}"
                 null
@@ -604,14 +1001,27 @@ object RnGrammarParser {
                 if (rawVal != "true" && rawVal != "false") "Expected Bool (true or false), got '$rawVal'" else null
             }
             "Email" -> {
-                if (!cleanStr.contains("@") || !cleanStr.substringAfter("@").contains(".")) {
-                    "Invalid Email format '$cleanStr'"
+                val addr = cleanStr.removePrefix("Email\"").removeSuffix("\"")
+                if (!addr.contains("@") || !addr.substringAfter("@").contains(".")) {
+                    "Invalid Email format '$addr'"
+                } else null
+            }
+            "Url", "Uri" -> {
+                val uri = cleanStr.removePrefix("Url\"").removeSuffix("\"")
+                if (!uri.startsWith("http://") && !uri.startsWith("https://") && !uri.startsWith("/")) {
+                    "Expected URL starting with https://, http://, or /, got '$uri'"
                 } else null
             }
             "Str", "String", "Text" -> {
                 val len = cleanStr.length
                 if (spec.min != null && len < spec.min) return "String length $len is shorter than min ${spec.min.toInt()}"
                 if (spec.max != null && len > spec.max) return "String length $len exceeds max ${spec.max.toInt()}"
+                if (spec.pattern != null) {
+                    val regex = runCatching { Regex(spec.pattern) }.getOrNull()
+                    if (regex != null && !regex.matches(cleanStr)) {
+                        return "Value '$cleanStr' does not match pattern Regex\"${spec.pattern}\""
+                    }
+                }
                 null
             }
             "Enum" -> {
@@ -777,55 +1187,38 @@ object RnGrammarParser {
                 continue
             }
 
-            // 5. Document Headings (`title`, `subtitle`, `part`, `section`, `topic`, `h1`..`h6`)
+            // 5. Document Headings (`title`, `subtitle`, `part`, `section`, `topic`, `h1`..`h6` + Top 20 languages + Ukrainian)
             val firstWord = codePart.takeWhile { !it.isWhitespace() && it != '[' && it != '{' && it != '(' }
+            val firstWordLower = firstWord.lowercase()
             val afterWord = codePart.substring(firstWord.length).trim().removePrefix("[").trim()
-            when (firstWord) {
-                "title", "h1" -> {
-                    sb.append("# ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
-                "part", "h2", "subtitle" -> {
-                    sb.append("## ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
-                "section", "h3" -> {
-                    sb.append("### ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
-                "topic", "h4" -> {
-                    sb.append("#### ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
-                "h5" -> {
-                    sb.append("##### ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
-                "h6" -> {
-                    sb.append("###### ${renderInlineMarkdown(afterWord)}\n")
-                    i++
-                    continue
-                }
+            val headingLevel = I18nMdKeywords.getHeadingLevel(firstWordLower)
+            if (headingLevel in 1..6 && afterWord.isNotEmpty() && !codePart.endsWith("{") && !codePart.endsWith("(")) {
+                sb.append("#".repeat(headingLevel)).append(" ").append(renderInlineMarkdown(afterWord)).append("\n")
+                i++
+                continue
             }
 
-            // 6. Unordered & Ordered Lists (`ul [`, `ol [`)
-            if ((firstWord == "ul" || firstWord == "ol") && codePart.endsWith("[")) {
+            // 6. Unordered & Ordered Lists (`ul [`, `ol [`, `список [`, `нум [`, etc.)
+            if ((firstWordLower in I18nMdKeywords.UL_LIST || firstWordLower in I18nMdKeywords.OL_LIST) && codePart.endsWith("[")) {
                 val blockEnd = findBlockEnd(lines, i, indent)
-                renderListBlockToMarkdown(lines, i + 1, blockEnd, firstWord == "ol", indent, 0, sb)
+                renderListBlockToMarkdown(
+                    lines,
+                    i + 1,
+                    blockEnd,
+                    firstWordLower in I18nMdKeywords.OL_LIST,
+                    indent,
+                    0,
+                    sb
+                )
                 i = blockEnd + 1
                 continue
             }
 
-            // 7. Blockquotes & Callouts (`quote [`, `note [`, `warn [`)
-            if ((firstWord == "quote" || firstWord == "note" || firstWord == "warn") && codePart.endsWith("[")) {
+            // 7. Blockquotes & Callouts (`quote [`, `note [`, `warn [`, `цитата [`, `заметка [`, `внимание [`, `примітка [`, `увага [`)
+            if ((firstWordLower in I18nMdKeywords.QUOTE || firstWordLower in I18nMdKeywords.NOTE || firstWordLower in I18nMdKeywords.WARN) && codePart.endsWith("[")) {
                 val blockEnd = findBlockEnd(lines, i, indent)
-                if (firstWord == "note") sb.append("> [!NOTE]\n")
-                if (firstWord == "warn") sb.append("> [!WARNING]\n")
+                if (firstWordLower in I18nMdKeywords.NOTE) sb.append("> [!NOTE]\n")
+                if (firstWordLower in I18nMdKeywords.WARN) sb.append("> [!WARNING]\n")
                 for (sub in (i + 1)..blockEnd) {
                     val subTrim = lines[sub].trim()
                     if (subTrim.isEmpty()) {
@@ -1055,17 +1448,17 @@ object RnGrammarParser {
                     if (closeBracket >= p) {
                         val innerContent = renderInlineMarkdown(text.substring(p + 1, closeBracket))
                         when (tagName) {
-                            "b", "strong" -> sb.append("**$innerContent**")
-                            "i", "em" -> sb.append("*$innerContent*")
-                            "s", "del" -> sb.append("~~$innerContent~~")
-                            "code" -> sb.append("`$innerContent`")
-                            "a" -> {
+                            "b", "strong", "ж", "жирний", "жирный" -> sb.append("**$innerContent**")
+                            "i", "em", "к", "курсив" -> sb.append("*$innerContent*")
+                            "s", "del", "з", "зачерк" -> sb.append("~~$innerContent~~")
+                            "code", "код" -> sb.append("`$innerContent`")
+                            "a", "сс", "посилання", "ссылка" -> {
                                 val url = slotsStr?.trim()
                                     ?: extractPropValue(propsStr, "href")
                                     ?: "#"
                                 sb.append("[$innerContent]($url)")
                             }
-                            "img" -> {
+                            "img", "рис", " фото", "картинка" -> {
                                 val url = slotsStr?.trim()
                                     ?: extractPropValue(propsStr, "src")
                                     ?: ""
@@ -1194,4 +1587,296 @@ object RnGrammarParser {
     fun isPascalCase(s: String): Boolean =
         s.isNotEmpty() && s[0] in 'A'..'Z' && s.any { it in 'a'..'z' } &&
                 s.all { it.isLetterOrDigit() || it == '_' }
+
+    fun isTypedNumericLiteral(s: String): Boolean {
+        if (s.length < 2 || s[0] !in 'A'..'Z') return false
+        val prefix = s.takeWhile { it.isLetter() }
+        if (!isPascalCase(prefix)) return false
+        val rest = s.substring(prefix.length)
+        if (rest.isEmpty()) return false
+        if (prefix == "Ver" || prefix == "Semver") {
+            return rest[0].isDigit() && rest.all { it.isLetterOrDigit() || it == '.' || it == '-' }
+        }
+        return rest.toDoubleOrNull() != null
+    }
+
+    fun isEmailLiteral(s: String): Boolean {
+        val atIdx = s.indexOf('@')
+        if (atIdx <= 0 || atIdx >= s.length - 3) return false
+        val domain = s.substring(atIdx + 1)
+        return domain.contains('.') && !s.any { it.isWhitespace() || it == '"' || it == '\'' }
+    }
+
+    fun isUrlLiteral(s: String): Boolean {
+        return (s.startsWith("https://") || s.startsWith("http://")) && s.length > 8
+    }
+
+    /**
+     * Lightweight, zero-dependency converters from simple formats (JSON, YAML, CSV, .env/.properties, Markdown) into `.rn`.
+     */
+    fun convertSimpleFormatToRn(source: String, extension: String): String {
+        return when (extension.lowercase()) {
+            "json", "json5" -> convertJsonToRn(source)
+            "yaml", "yml" -> convertYamlToRn(source)
+            "csv", "tsv" -> convertCsvToRn(source, if (extension.lowercase() == "tsv") '\t' else ',')
+            "env", "properties", "ini" -> convertEnvOrPropertiesToRn(source)
+            "md", "markdown" -> convertMarkdownToRn(source)
+            else -> convertJsonToRn(source)
+        }
+    }
+
+    fun convertJsonToRn(jsonText: String): String {
+        val trimmed = jsonText.trim()
+        if (trimmed.isEmpty()) return ""
+        val sb = StringBuilder()
+        var indent = 0
+        val lines = trimmed.lines()
+
+        // Simple recursive-descent tokenizing converter for JSON objects & arrays -> 1-space `.rn`
+        var i = 0
+        fun skipWs() {
+            while (i < trimmed.length && trimmed[i].isWhitespace()) i++
+        }
+        fun readJsonString(): String {
+            if (i >= trimmed.length || trimmed[i] != '"') return ""
+            i++
+            val out = StringBuilder()
+            while (i < trimmed.length) {
+                val c = trimmed[i]
+                if (c == '\\' && i + 1 < trimmed.length) {
+                    out.append(c).append(trimmed[i + 1])
+                    i += 2
+                    continue
+                }
+                if (c == '"') {
+                    i++
+                    break
+                }
+                out.append(c)
+                i++
+            }
+            return out.toString()
+        }
+        fun formatRnKey(k: String): String {
+            return if (k.isNotEmpty() && k.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' }) k else "\"$k\""
+        }
+        fun formatRnScalar(raw: String): String {
+            val s = raw.trim()
+            if (s == "null") return "None"
+            if (s == "true" || s == "false") return s
+            if (s.toDoubleOrNull() != null) return s
+            val unq = s.removeSurrounding("\"")
+            if (unq.isEmpty()) return "\"\""
+            if (isEmailLiteral(unq) || isUrlLiteral(unq)) return unq
+            if (unq.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '/' || it == '.' } &&
+                unq !in setOf("true", "false", "None")
+            ) {
+                return unq
+            }
+            return "\"$unq\""
+        }
+
+        fun parseValue(currentIndent: Int, keyPrefix: String?) {
+            skipWs()
+            if (i >= trimmed.length) return
+            val pad = " ".repeat(currentIndent)
+            when (trimmed[i]) {
+                '{' -> {
+                    i++
+                    skipWs()
+                    if (i < trimmed.length && trimmed[i] == '}') {
+                        i++
+                        if (keyPrefix != null) sb.append("$pad$keyPrefix {}\n")
+                        return
+                    }
+                    val childIndent = if (keyPrefix != null) {
+                        sb.append("$pad$keyPrefix {\n")
+                        currentIndent + 1
+                    } else {
+                        currentIndent
+                    }
+                    while (i < trimmed.length) {
+                        skipWs()
+                        if (i < trimmed.length && trimmed[i] == '}') {
+                            i++
+                            break
+                        }
+                        val k = if (trimmed[i] == '"') readJsonString() else {
+                            val start = i
+                            while (i < trimmed.length && trimmed[i] != ':' && !trimmed[i].isWhitespace()) i++
+                            trimmed.substring(start, i)
+                        }
+                        skipWs()
+                        if (i < trimmed.length && trimmed[i] == ':') i++
+                        parseValue(childIndent, formatRnKey(k))
+                        skipWs()
+                        if (i < trimmed.length && trimmed[i] == ',') i++
+                    }
+                }
+                '[' -> {
+                    i++
+                    skipWs()
+                    if (i < trimmed.length && trimmed[i] == ']') {
+                        i++
+                        if (keyPrefix != null) sb.append("$pad$keyPrefix ()\n")
+                        return
+                    }
+                    // Check if array is a simple 1D scalar list that fits on one line
+                    val savedPos = i
+                    val scalarItems = mutableListOf<String>()
+                    var isSimpleScalarList = true
+                    while (i < trimmed.length) {
+                        skipWs()
+                        if (i < trimmed.length && trimmed[i] == ']') {
+                            i++
+                            break
+                        }
+                        if (trimmed[i] == '{' || trimmed[i] == '[') {
+                            isSimpleScalarList = false
+                            break
+                        }
+                        if (trimmed[i] == '"') {
+                            val str = readJsonString()
+                            scalarItems.add(formatRnScalar("\"$str\""))
+                        } else {
+                            val start = i
+                            while (i < trimmed.length && trimmed[i] != ',' && trimmed[i] != ']' && !trimmed[i].isWhitespace()) i++
+                            scalarItems.add(formatRnScalar(trimmed.substring(start, i)))
+                        }
+                        skipWs()
+                        if (i < trimmed.length && trimmed[i] == ',') i++
+                    }
+                    if (isSimpleScalarList) {
+                        val prefix = if (keyPrefix != null) "$pad$keyPrefix " else pad
+                        if (scalarItems.joinToString(", ").length <= 60) {
+                            sb.append("$prefix(${scalarItems.joinToString(", ")}\n")
+                        } else {
+                            sb.append("$prefix(\n")
+                            for (item in scalarItems) {
+                                sb.append("$pad $item\n")
+                            }
+                        }
+                    } else {
+                        i = savedPos
+                        val prefix = if (keyPrefix != null) "$pad$keyPrefix (\n" else "$pad(\n"
+                        sb.append(prefix)
+                        var idx = 1
+                        while (i < trimmed.length) {
+                            skipWs()
+                            if (i < trimmed.length && trimmed[i] == ']') {
+                                i++
+                                break
+                            }
+                            parseValue(currentIndent + 1, "item_$idx")
+                            idx++
+                            skipWs()
+                            if (i < trimmed.length && trimmed[i] == ',') i++
+                        }
+                    }
+                }
+                '"' -> {
+                    val s = readJsonString()
+                    val formatted = formatRnScalar("\"$s\"")
+                    if (keyPrefix != null) sb.append("$pad$keyPrefix $formatted\n") else sb.append("$pad$formatted\n")
+                }
+                else -> {
+                    val start = i
+                    while (i < trimmed.length && trimmed[i] != ',' && trimmed[i] != '}' && trimmed[i] != ']' && !trimmed[i].isWhitespace()) {
+                        i++
+                    }
+                    val formatted = formatRnScalar(trimmed.substring(start, i))
+                    if (keyPrefix != null) sb.append("$pad$keyPrefix $formatted\n") else sb.append("$pad$formatted\n")
+                }
+            }
+        }
+
+        parseValue(0, null)
+        return sb.toString().trimEnd() + "\n"
+    }
+
+    fun convertYamlToRn(yamlText: String): String {
+        val sb = StringBuilder()
+        for (rawLine in yamlText.lines()) {
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                sb.append(rawLine).append("\n")
+                continue
+            }
+            val indent = (rawLine.takeWhile { it == ' ' }.length / 2).coerceAtLeast(0)
+            val pad = " ".repeat(indent)
+            if (trimmed.startsWith("- ")) {
+                sb.append("$pad${trimmed.removePrefix("- ").trim()}\n")
+            } else if (trimmed.endsWith(":")) {
+                val key = trimmed.dropLast(1).trim()
+                sb.append("$pad$key {\n")
+            } else if (trimmed.contains(": ")) {
+                val key = trimmed.substringBefore(": ").trim()
+                val rawVal = trimmed.substringAfter(": ").trim()
+                val rnVal = if (rawVal == "null" || rawVal == "~") "None" else rawVal
+                sb.append("$pad$key $rnVal\n")
+            } else {
+                sb.append("$pad$trimmed\n")
+            }
+        }
+        return RnTableFormatter.formatDocument(sb.toString()).trimEnd() + "\n"
+    }
+
+    fun convertCsvToRn(csvText: String, separator: Char = ','): String {
+        val sb = StringBuilder("data (\n")
+        for (rawLine in csvText.lines()) {
+            val t = rawLine.trim()
+            if (t.isEmpty()) continue
+            val normalized = if (separator == ',') t else t.replace(separator, ',')
+            sb.append(" ").append(normalized).append("\n")
+        }
+        return RnTableFormatter.formatDocument(sb.toString()).trimEnd() + "\n"
+    }
+
+    fun convertEnvOrPropertiesToRn(envText: String): String {
+        val sb = StringBuilder("env {\n")
+        for (rawLine in envText.lines()) {
+            val t = rawLine.trim()
+            if (t.isEmpty() || t.startsWith("#")) {
+                if (t.startsWith("#")) sb.append(" ").append(if (t.startsWith("# ")) t else "# ${t.removePrefix("#")}").append("\n")
+                continue
+            }
+            val eqIdx = t.indexOf('=')
+            if (eqIdx > 0) {
+                val k = t.substring(0, eqIdx).trim()
+                val v = t.substring(eqIdx + 1).trim()
+                sb.append(" $k ${if (v.isEmpty()) "None" else v}\n")
+            }
+        }
+        return sb.toString().trimEnd() + "\n"
+    }
+
+    fun convertMarkdownToRn(mdText: String): String {
+        val sb = StringBuilder("meta {\n type Md\n\n")
+        val lines = mdText.lines()
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            val t = line.trim()
+            when {
+                t.startsWith("# ") -> sb.append("title ${t.removePrefix("# ").trim()}\n")
+                t.startsWith("## ") -> sb.append("part ${t.removePrefix("## ").trim()}\n")
+                t.startsWith("### ") -> sb.append("section ${t.removePrefix("### ").trim()}\n")
+                t.startsWith("#### ") -> sb.append("topic ${t.removePrefix("#### ").trim()}\n")
+                t.startsWith("```") -> {
+                    val lang = t.removePrefix("```").trim().replaceFirstChar { it.uppercase() }
+                    val opener = if (lang.isEmpty()) "code \"" else "code $lang\""
+                    sb.append("$opener\n")
+                    i++
+                    while (i < lines.size && !lines[i].trim().startsWith("```")) {
+                        sb.append(lines[i]).append("\n")
+                        i++
+                    }
+                    sb.append("\"\n")
+                }
+                else -> sb.append(line).append("\n")
+            }
+            i++
+        }
+        return sb.toString().trimEnd() + "\n"
+    }
 }

@@ -125,6 +125,48 @@ object RnExporterService {
         }
     }
 
+    /**
+     * Converts a simple structured file (`.json`, `.yaml`, `.csv`, `.env`, `.properties`, `.md`) into `.rn`
+     * and writes `<name>.<ext>.rn` next to the source file.
+     */
+    fun importFileToRnDisk(
+        project: Project,
+        sourceFile: VirtualFile?,
+        sourceText: String,
+        openInEditor: Boolean = true,
+        onComplete: ((File, String) -> Unit)? = null
+    ) {
+        val ext = sourceFile?.extension ?: "json"
+        val convertedResult = runCatching {
+            RnGrammarParser.convertSimpleFormatToRn(sourceText, ext)
+        }
+        convertedResult.onSuccess { rnText ->
+            ApplicationManager.getApplication().invokeLater {
+                try {
+                    val baseDir = sourceFile?.parent?.path ?: project.basePath ?: System.getProperty("user.home")
+                    val outFileName = if (sourceFile != null) {
+                        "${sourceFile.name}.rn"
+                    } else {
+                        "imported.json.rn"
+                    }
+                    val outFile = File(baseDir, outFileName)
+                    outFile.writeText(rnText, Charsets.UTF_8)
+
+                    val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(outFile)
+                    if (vf != null && openInEditor) {
+                        FileEditorManager.getInstance(project).openFile(vf, true)
+                    }
+                    notify(project, "Converted to ${outFile.name}", NotificationType.INFORMATION)
+                    onComplete?.invoke(outFile, rnText)
+                } catch (e: Exception) {
+                    notify(project, "Failed to write .rn file: ${e.message}", NotificationType.ERROR)
+                }
+            }
+        }.onFailure { err ->
+            notify(project, "Import to .rn failed: ${err.message}", NotificationType.ERROR)
+        }
+    }
+
     fun getActiveFileAndText(project: Project): Pair<VirtualFile?, String>? {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor
         if (editor != null) {

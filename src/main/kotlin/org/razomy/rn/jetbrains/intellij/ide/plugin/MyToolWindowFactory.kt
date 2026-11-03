@@ -63,6 +63,22 @@ class MyToolWindowFactory : ToolWindowFactory {
                 })
             }
 
+            buttonsPanel.add(JButton("IMPORT -> .RN").apply {
+                toolTipText = "Convert active JSON, YAML, CSV, .env, or Markdown file into Razomy Notation (.rn)"
+                addActionListener {
+                    val active = RnExporterService.getActiveFileAndText(project)
+                    if (active == null) {
+                        statusLabel.text = MyMessageBundle.message("toolwindow.rn.status.nofile")
+                        return@addActionListener
+                    }
+                    RnExporterService.importFileToRnDisk(project, active.first, active.second) { outFile, rnText ->
+                        previewArea.text = rnText
+                        previewArea.caretPosition = 0
+                        statusLabel.text = "Imported ${outFile.name}"
+                    }
+                }
+            })
+
             val autoExportToggle = JBCheckBox(
                 "Auto-export on Save (*.md.rn -> .md, *.json.rn -> .json)",
                 RnSettingsState.getInstance().state.autoExportOnSave

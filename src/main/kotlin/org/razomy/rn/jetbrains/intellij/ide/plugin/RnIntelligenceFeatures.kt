@@ -206,8 +206,21 @@ class RnAnnotator : Annotator {
         val text = element.text
         val isMd = element.name.endsWith(".md.rn", ignoreCase = true)
 
+        // Collect schemas from sibling .rn files in the same directory so cross-file schemas work seamlessly
+        val externalSchemas = mutableMapOf<String, Map<String, RnGrammarParser.SchemaFieldSpec>>()
+        element.virtualFile?.parent?.children?.forEach { sibling ->
+            if (!sibling.isDirectory && sibling != element.virtualFile &&
+                (sibling.extension == "rn" || sibling.extension == "rl")
+            ) {
+                runCatching {
+                    val siblingText = String(sibling.contentsToByteArray(), Charsets.UTF_8)
+                    externalSchemas.putAll(RnGrammarParser.extractSchemasFromText(siblingText))
+                }
+            }
+        }
+
         val syntaxDiagnostics = RnGrammarParser.validateDocument(text, isMd)
-        val schemaDiagnostics = RnGrammarParser.validateSchemasInDocument(text)
+        val schemaDiagnostics = RnGrammarParser.validateSchemasInDocument(text, externalSchemas)
 
         for (diag in (syntaxDiagnostics + schemaDiagnostics)) {
             val start = diag.startOffset.coerceIn(0, text.length)
@@ -250,11 +263,11 @@ class RnCompletionContributor : CompletionContributor() {
                     val lineStart = docText.lastIndexOf('\n', (offset - 1).coerceAtLeast(0)) + 1
                     val linePrefix = docText.substring(lineStart, offset)
 
-                    // 1.Md Document & HTML Tag Completion (active in *.md.rn or inside Md[/Html[ streams)
+                    // 1. Md Document, Multilingual (RU/UK) & HTML Tag Completion
                     addMdAndHtmlCompletions(result, linePrefix)
 
-                    // 2. Schema Type & Type Constructor Completion
-                    addSchemaAndTypeCompletions(result)
+                    // 2. Smart Context-Aware Schema Types, Constraints & User-Defined Schemas
+                    addSmartSchemaAndTypeCompletions(docText, offset, linePrefix, vFile, result)
 
                     // 3. Relative & Project File Path Completion
                     if (vFile != null) {
@@ -282,13 +295,31 @@ class RnCompletionContributor : CompletionContributor() {
             Triple("code Ts\"", "code Ts\"\n\n\"", "Md Fenced TypeScript Code Block"),
             Triple("code Rn\"", "code Rn\"\n\n\"", "Md Fenced Razomy Notation Block"),
             Triple("table (", "table (\n col1, col2\n ", "Md 2D Relational Table"),
-            Triple("example {", "example {\n input Rn\"\n\"\n output Md\"\n\"", "Specification Example Block")
+            Triple("meta {", "meta {\n name \n version 1.0.0\n type Md\n schema ", "Document Metadata & Schema Header"),
+            Triple("example {", "example {\n input Rn\"\n\"\n output Md\"\n\"", "Specification Example Block"),
+            // Russian & Ukrainian Keyboard Lifehacks (auto-inserts brackets `[` `{` `(` `"` without layout switch!)
+            Triple("заголовок", "заголовок ", "RU/UK H1 Заголовок документа (#)"),
+            Triple("часть", "часть ", "RU H2 Часть документа (##)"),
+            Triple("частина", "частина ", "UK H2 Частина документа (##)"),
+            Triple("раздел", "раздел ", "RU H3 Раздел (###)"),
+            Triple("розділ", "розділ ", "UK H3 Розділ (###)"),
+            Triple("тема", "тема ", "RU/UK H4 Тема (####)"),
+            Triple("список [", "список [\n ", "RU/UK Список без переключения раскладки"),
+            Triple("нум [", "нум [\n ", "RU/UK Нумерованный список"),
+            Triple("цитата [", "цитата [\n ", "RU/UK Цитата (>)"),
+            Triple("заметка [", "заметка [\n ", "RU Заметка (> [!NOTE])"),
+            Triple("примітка [", "примітка [\n ", "UK Примітка (> [!NOTE])"),
+            Triple("внимание [", "внимание [\n ", "RU Внимание (> [!WARNING])"),
+            Triple("увага [", "увага [\n ", "UK Увага (> [!WARNING])"),
+            Triple("таблица (", "таблица (\n колонка1, колонка2\n ", "RU/UK 2D Таблица"),
+            Triple("код Rn\"", "код Rn\"\n\n\"", "RU/UK Блок кода без переключения раскладки")
         )
 
         if (isLineStart) {
             for ((lookup, insertText, typeDesc) in blockElements) {
                 result.addElement(
                     LookupElementBuilder.create(insertText)
+                        .withLookupString(lookup)
                         .withPresentableText(lookup)
                         .withTypeText(typeDesc, true)
                         .withIcon(AllIcons.Nodes.Tag)
@@ -304,6 +335,9 @@ class RnCompletionContributor : CompletionContributor() {
             Triple("a(/url)[text]", "a(/path)[text]", "Hyperlink or relative file link"),
             Triple("img(/url)[alt]", "img(./image.png)[alt]", "Embedded image"),
             Triple("span{class x}[text]", "span{class highlight}[text]", "Inline HTML span with Props"),
+            Triple("ж[...]", "ж[]", "RU/UK Жирный текст (**жирный**) без смены раскладки"),
+            Triple("к[...]", "к[]", "RU/UK Курсив (*курсив*) без смены раскладки"),
+            Triple("сс(/url)[текст]", "сс(/path)[текст]", "RU/UK Ссылка без смены раскладки"),
             Triple("div{class card} [", "div{class card} [\n ", "HTML div container block"),
             Triple("article{id post} [", "article{id post} [\n ", "HTML article block"),
             Triple("p [", "p [ ", "HTML paragraph stream")
@@ -312,6 +346,7 @@ class RnCompletionContributor : CompletionContributor() {
         for ((presentable, insertText, desc) in inlineElements) {
             result.addElement(
                 LookupElementBuilder.create(insertText)
+                    .withLookupString(presentable.substringBefore("["))
                     .withPresentableText(presentable)
                     .withTypeText(desc, true)
                     .withIcon(AllIcons.Nodes.Tag)
@@ -319,17 +354,112 @@ class RnCompletionContributor : CompletionContributor() {
         }
     }
 
-    private fun addSchemaAndTypeCompletions(result: CompletionResultSet) {
+    private fun addSmartSchemaAndTypeCompletions(
+        docText: String,
+        offset: Int,
+        linePrefix: String,
+        currentFile: VirtualFile?,
+        result: CompletionResultSet
+    ) {
+        // 1. Collect all user-defined schemas from current file + sibling .rn files
+        val allSchemas = mutableMapOf<String, Map<String, RnGrammarParser.SchemaFieldSpec>>()
+        currentFile?.parent?.children?.forEach { sibling ->
+            if (!sibling.isDirectory && (sibling.extension == "rn" || sibling.extension == "rl")) {
+                runCatching {
+                    val text = String(sibling.contentsToByteArray(), Charsets.UTF_8)
+                    allSchemas.putAll(RnGrammarParser.extractSchemasFromText(text))
+                }
+            }
+        }
+        allSchemas.putAll(RnGrammarParser.extractSchemasFromText(docText))
+
+        // 2. If cursor is inside a typed schema instance `valid_user UserForm{`, suggest the schema's fields!
+        val enclosingSchemaName = findEnclosingTypedBlockSchema(docText, offset, allSchemas)
+        if (enclosingSchemaName != null) {
+            val fields = allSchemas[enclosingSchemaName] ?: emptyMap()
+            for ((fieldName, spec) in fields) {
+                val reqBadge = if (spec.optional || spec.hasDefault) "Optional ${spec.baseType}" else "Required ${spec.baseType}"
+                result.addElement(
+                    LookupElementBuilder.create("$fieldName ")
+                        .withLookupString(fieldName)
+                        .withPresentableText(fieldName)
+                        .withTailText("  (${spec.baseType})", true)
+                        .withTypeText("$enclosingSchemaName • $reqBadge", true)
+                        .withIcon(AllIcons.Nodes.Field)
+                        .bold()
+                )
+            }
+        }
+
+        // 3. Suggest user-defined Schema Constructors (`UserForm{`, etc.)
+        for ((schemaName, fields) in allSchemas) {
+            val requiredTemplate = fields.values
+                .filter { !it.optional && !it.hasDefault }
+                .joinToString("\n ") { "${it.fieldName} " }
+            val insert = if (requiredTemplate.isNotEmpty()) "$schemaName{\n $requiredTemplate" else "$schemaName{\n "
+            result.addElement(
+                LookupElementBuilder.create(insert)
+                    .withLookupString(schemaName)
+                    .withPresentableText("$schemaName{ ... }")
+                    .withTailText("  (${fields.keys.joinToString(", ")})", true)
+                    .withTypeText("Defined Schema Archetype", true)
+                    .withIcon(AllIcons.Nodes.Class)
+                    .bold()
+            )
+        }
+
+        // 4. Inside `{...}` schema constraint properties, suggest standard constraint keys
+        val openBraces = linePrefix.count { it == '{' } - linePrefix.count { it == '}' }
+        if (openBraces > 0) {
+            val constraintProps = listOf(
+                Triple("min", "min 1", "Minimum value or string length"),
+                Triple("max", "max 100", "Maximum value or string length"),
+                Triple("default", "default None", "Default field value"),
+                Triple("label", "label \"\"", "UI Form field label"),
+                Triple("placeholder", "placeholder \"\"", "UI Form input placeholder"),
+                Triple("pattern Regex\"...\"", "pattern Regex\"^[a-z0-9_]+$\"", "Regular expression constraint"),
+                Triple("examples (...)", "examples ()", "Example values tuple"),
+                Triple("min_items", "min_items 1", "Minimum items in List"),
+                Triple("max_items", "max_items 10", "Maximum items in List"),
+                Triple("unique", "unique true", "Require unique items in List"),
+                Triple("widget", "widget 'radio", "UI widget ('radio, 'textarea, 'select)"),
+                Triple("format", "format 'uri", "String semantic format ('uri, 'uuid)")
+            )
+            for ((lookup, insert, desc) in constraintProps) {
+                result.addElement(
+                    LookupElementBuilder.create(insert)
+                        .withLookupString(lookup)
+                        .withPresentableText(lookup)
+                        .withTypeText(desc, true)
+                        .withIcon(AllIcons.Nodes.Property)
+                )
+            }
+        }
+
+        // 5. Standard Scalar, Currency, Form & Pentad Type Constructors (NO `?` operator, uses `& Optional` and `{min, max}`)
         val schemaTypes = listOf(
-            Triple("Str(min, max){label \"...\"}", "Str(1, 100){label \"\"}", "Schema String Archetype"),
-            Triple("Int(min, max){default 0}", "Int(0, 100){default 0}", "Schema Integer Archetype"),
-            Triple("Float(min, max)", "Float(0.0, 1.0)", "Schema Float Archetype"),
+            Triple("Str{min, max, label}", "Str{min 3, max 20, label \"\"}", "Schema String Archetype"),
+            Triple("Str & Optional", "Str & Optional {default None}", "Optional String Field (& Optional)"),
+            Triple("Int{min, max, default}", "Int{min 0, max 100, default 0}", "Schema Integer Archetype"),
+            Triple("Float{min, max}", "Float{min 0.0, max 1.0}", "Schema Float Archetype"),
+            Triple("Dec{min, max}", "Dec{min 0.0, max 1000.0}", "Schema Decimal Archetype"),
+            Triple("Usd123.46", "Usd123.46", "Typed USD Currency Number Literal"),
+            Triple("Usd{min, default}", "Usd{min 0, default Usd0.00}", "Schema USD Currency Archetype"),
+            Triple("Eur{min, default}", "Eur{min 0, default Eur0.00}", "Schema EUR Currency Archetype"),
+            Triple("Uah{min, default}", "Uah{min 0, default Uah0.00}", "Schema UAH Currency Archetype"),
+            Triple("Km / Ms / Pct", "Pct99.9", "Typed Unit / Percentage Number Literal"),
+            Triple("Ver1.0.0", "Ver1.0.0", "Typed Semantic Version Literal"),
             Triple("Bool{default true}", "Bool{default true}", "Schema Boolean Archetype"),
-            Triple("Uuid{'pk}", "Uuid{'pk}", "Schema UUID Primary Key"),
-            Triple("Email{label \"Email\"}", "Email{label \"Email\"}", "Schema Email Archetype"),
-            Triple("Date\"YYYY-MM-DD\"", "Date\"2026-03-30\"", "Constructed Date Literal"),
-            Triple("Enum('a, 'b){default 'a}", "Enum('admin, 'member){default 'member}", "Schema Enum Archetype"),
-            Triple("List(Str){min_items 1}", "List(Str){min_items 1}", "Schema Typed Array Archetype"),
+            Triple("Uuid{'pk}", "Uuid{'pk, gen 'uuid_v7}", "Schema UUID Primary Key"),
+            Triple("Email{label \"Email\"}", "Email{label \"Work Email\", examples (alex@razomy.org)}", "Schema Email Archetype"),
+            Triple("Url & Optional", "Url & Optional {default None, examples (https://www.razomy.org)}", "Schema URL / URI Archetype"),
+            Triple("Regex\"^[a-z0-9_]+$\"", "Regex\"^[a-z0-9_]+$\"", "Constructed Regular Expression Literal"),
+            Triple("Date\"YYYY-MM-DD\"", "Date\"2026-03-30\"", "Constructed ISO Date Literal"),
+            Triple("DateTime\"...\"", "DateTime\"2026-03-30T12:00:00Z\"", "Constructed ISO DateTime Literal"),
+            Triple("Enum('a, 'b){default 'a}", "Enum('admin, 'editor, 'viewer){default 'viewer}", "Schema Enum Archetype"),
+            Triple("List(Str){min_items 1}", "List(Str){min_items 1, max_items 5, unique true}", "Schema Typed List Archetype"),
+            Triple("Map(Str, Any)", "Map(Str, Any)", "Schema Key-Value Map Archetype"),
+            Triple("& Optional", "& Optional", "Algebraic Optional Field Mixin"),
             Triple("None", "None", "Unified None / null scalar"),
             Triple("Sql(", "Sql(\n select, from, where\n ", "Attached SQL Type Constructor"),
             Triple("Html[", "Html[\n ", "Attached HTML Stream Type Constructor"),
@@ -341,11 +471,38 @@ class RnCompletionContributor : CompletionContributor() {
         for ((presentable, insert, desc) in schemaTypes) {
             result.addElement(
                 LookupElementBuilder.create(insert)
+                    .withLookupString(presentable.takeWhile { it.isLetterOrDigit() || it == '&' || it == ' ' }.trim())
                     .withPresentableText(presentable)
                     .withTypeText(desc, true)
                     .withIcon(AllIcons.Nodes.Type)
             )
         }
+    }
+
+    private fun findEnclosingTypedBlockSchema(
+        docText: String,
+        offset: Int,
+        allSchemas: Map<String, Map<String, RnGrammarParser.SchemaFieldSpec>>
+    ): String? {
+        val before = docText.substring(0, offset.coerceIn(0, docText.length))
+        val lines = before.split("\n")
+        if (lines.isEmpty()) return null
+        val currentIndent = RnGrammarParser.getIndent(lines.last())
+        for (i in (lines.size - 2) downTo 0) {
+            val raw = lines[i]
+            if (raw.isBlank()) continue
+            val ind = RnGrammarParser.getIndent(raw)
+            if (ind < currentIndent) {
+                val clean = RnGrammarParser.stripInlineComment(raw).trim()
+                if (clean.endsWith("{")) {
+                    val parts = clean.dropLast(1).trim().split(Regex("\\s+"))
+                    val lastPart = parts.lastOrNull()?.substringAfterLast('#') ?: return null
+                    if (lastPart in allSchemas) return lastPart
+                }
+                break
+            }
+        }
+        return null
     }
 
     private fun addProjectFileCompletions(

@@ -153,6 +153,17 @@
             <action id="RN.FormatRn"
                     class="org.razomy.rn.jetbrains.intellij.ide.plugin.FormatRnCanonicalAction"
                     text="Format Canonical .rn (1-Space)"/>
+            <action id="RN.ImportToRn"
+                    class="org.razomy.rn.jetbrains.intellij.ide.plugin.ConvertFileToRnAction"
+                    text="Convert JSON / YAML / CSV / .env / MD to .rn"/>
         </group>
+
+        <action id="RN.ConvertFileToRnPopup"
+                class="org.razomy.rn.jetbrains.intellij.ide.plugin.ConvertFileToRnAction"
+                text="Convert File to Razomy Notation (.rn)"
+                icon="/META-INF/pluginIcon.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="CutCopyPasteGroup"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </action>
     </actions>
 </idea-plugin>

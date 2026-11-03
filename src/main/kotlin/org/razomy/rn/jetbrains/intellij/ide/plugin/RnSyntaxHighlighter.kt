@@ -92,11 +92,20 @@ class RnLexer : LexerBase() {
     private var tokenEnd: Int = 0
     private var currentToken: IElementType? = null
 
+    private data class BlockScope(val indent: Int, val mode: Char) // '[' Stream, '{' Form, '(' Tuple
+    private val blockStack = ArrayDeque<BlockScope>()
+    private val inlineBracketStack = ArrayDeque<Char>()
+    private var lastLineCheckedOffset = -1
+
     override fun start(buffer: CharSequence, startOffset: Int, endOffset: Int, initialState: Int) {
         this.buffer = buffer
         this.startOffset = startOffset
         this.endOffset = endOffset
         this.pos = startOffset
+        this.blockStack.clear()
+        this.blockStack.addLast(BlockScope(-1, '[')) // Axiom 1.1: Implicit Stream Root
+        this.inlineBracketStack.clear()
+        this.lastLineCheckedOffset = -1
         advance()
     }
 
@@ -119,12 +128,18 @@ class RnLexer : LexerBase() {
         // Whitespace
         if (ch.isWhitespace()) {
             while (pos < endOffset && buffer[pos].isWhitespace()) {
+                if (buffer[pos] == '\n') {
+                    inlineBracketStack.clear()
+                }
                 pos++
             }
             tokenEnd = pos
             currentToken = TokenType.WHITE_SPACE
             return
         }
+
+        // Update indentation-based Block Scope at the first non-whitespace token of a line
+        updateBlockStackForToken(tokenStart)
 
         // Homoiconic Comment: `# ` (inline) or `#` at EOL (indented block comment, including attached `Type#`)
         if (ch == '#') {
@@ -134,7 +149,10 @@ class RnLexer : LexerBase() {
             }
             if (isAtStartOfLineOrWhitespace(tokenStart)) {
                 val nextCh = if (pos + 1 < endOffset) buffer[pos + 1] else '\n'
-                if (nextCh == ' ' || nextCh == '\t') {
+                // Support both `# comment` and unformatted `#comment` at start of line (unless hex color like `#111111`)
+                val isHexColor = (pos + 7 <= endOffset) &&
+                        buffer.subSequence(pos + 1, pos + 7).all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                if (nextCh == ' ' || nextCh == '\t' || ( isAtStartOfLineOrIndent(tokenStart) && !isHexColor && !nextCh.isDigit() )) {
                     while (pos < endOffset && buffer[pos] != '\n') {
                         pos++
                     }
@@ -147,6 +165,18 @@ class RnLexer : LexerBase() {
 
         // Symmetric Triad Brackets
         if (ch == '[' || ch == ']' || ch == '{' || ch == '}' || ch == '(' || ch == ')') {
+            if (ch == '[' || ch == '{' || ch == '(') {
+                if (isEndOfLineDelimiter(pos)) {
+                    val lineIndent = getLineIndentAt(pos)
+                    blockStack.addLast(BlockScope(lineIndent, ch))
+                } else {
+                    inlineBracketStack.addLast(ch)
+                }
+            } else {
+                if (inlineBracketStack.isNotEmpty()) {
+                    inlineBracketStack.removeLast()
+                }
+            }
             pos++
             tokenEnd = pos
             currentToken = RnTypes.BRACKET
@@ -161,14 +191,8 @@ class RnLexer : LexerBase() {
             return
         }
 
-        // Algebraic Composition Operators (`&`, `^`, `/`) and Optional Schema Type Mark (`?`)
+        // Algebraic Composition Operators (`&`, `^`, `/`)
         if ((ch == '&' || ch == '^' || ch == '/') && isAlgebraOperatorContext(pos)) {
-            pos++
-            tokenEnd = pos
-            currentToken = RnTypes.OPERATOR
-            return
-        }
-        if (ch == '?' && isOptionalMarkAfterType(pos)) {
             pos++
             tokenEnd = pos
             currentToken = RnTypes.OPERATOR
@@ -237,9 +261,6 @@ class RnLexer : LexerBase() {
             if ((c == '&' || c == '^' || c == '/') && isAlgebraOperatorContext(pos)) {
                 break
             }
-            if (c == '?' && isOptionalMarkAfterType(pos)) {
-                break
-            }
             if (c == '"') {
                 // Check if this is a Column-0 raw string opener `(Type)?(N)?"` at end of line
                 if (isEndOfLineQuote(pos)) {
@@ -271,16 +292,20 @@ class RnLexer : LexerBase() {
 
         currentToken = when {
             word == "true" || word == "false" || word == "None" -> RnTypes.KEYWORD
-            word in setOf("title", "subtitle", "part", "section", "topic", "quote", "note", "warn") &&
-                    isAtStartOfLineOrIndent(tokenStart) -> RnTypes.KEYWORD
+            word.lowercase() in RnGrammarParser.I18nMdKeywords.ALL_DOCUMENT_KEYWORDS &&
+                    isAtStartOfLineOrIndent(tokenStart) &&
+                    currentBlockMode() == '[' -> RnTypes.KEYWORD
             isNumberLiteral(word) -> RnTypes.NUMBER
+            RnGrammarParser.isTypedNumericLiteral(word) ||
+                    RnGrammarParser.isEmailLiteral(word) ||
+                    RnGrammarParser.isUrlLiteral(word) -> RnTypes.TYPED_LITERAL
             // Inline or stream markup tag (`b[bold]`, `a(/url)[text]`, `span{class x}[text]`, `ul [`)
             isInlineOrStreamTag(word, tokenStart, tokenEnd) -> RnTypes.TAG
-            // v1.0.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Int(1, 10){label "x"}`)
+            // v1.0.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Str{min 3, max 20}`)
             isPascalCaseType(word) && isDirectlyFollowedByPentad(tokenEnd) -> RnTypes.SCHEMA_PORTAL
-            // v1.0.0 Schema Type Definition (`Uuid{'pk}`, `Str`, `Int(18, 120){default 18}`, `Uuid`)
+            // v1.0.0 Schema Type Definition (`Uuid{'pk}`, `Str & Optional`, `Optional`, `Uuid`)
             isPascalCaseType(word) && isSchemaTypePosition(tokenStart, tokenEnd) -> RnTypes.SCHEMA_TYPE
-            isKeyTokenPosition(tokenStart, tokenEnd) -> RnTypes.KEY
+            isKeyTokenPosition(word, tokenStart, tokenEnd) -> RnTypes.KEY
             else -> RnTypes.STRING
         }
     }
@@ -354,6 +379,34 @@ class RnLexer : LexerBase() {
         return indent
     }
 
+    private fun updateBlockStackForToken(tokenPos: Int) {
+        if (!isAtStartOfLineOrIndent(tokenPos)) return
+        if (lastLineCheckedOffset == tokenPos) return
+        lastLineCheckedOffset = tokenPos
+        val indent = getLineIndentAt(tokenPos)
+        while (blockStack.size > 1 && indent <= blockStack.last().indent) {
+            blockStack.removeLast()
+        }
+    }
+
+    private fun currentBlockMode(): Char {
+        if (inlineBracketStack.isNotEmpty()) {
+            return inlineBracketStack.last()
+        }
+        return blockStack.lastOrNull()?.mode ?: '['
+    }
+
+    private fun isEndOfLineDelimiter(delimPos: Int): Boolean {
+        var i = delimPos + 1
+        while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t' || buffer[i] == '\r')) {
+            i++
+        }
+        if (i < endOffset && buffer[i] == '#') {
+            return true
+        }
+        return i >= endOffset || buffer[i] == '\n'
+    }
+
     private fun isEndOfLineHash(hashPos: Int): Boolean {
         var i = hashPos + 1
         while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t' || buffer[i] == '\r')) {
@@ -386,36 +439,89 @@ class RnLexer : LexerBase() {
         return prevSpace && nextSpace
     }
 
-    private fun isOptionalMarkAfterType(idx: Int): Boolean {
-        if (idx <= startOffset) return false
-        var start = idx - 1
-        while (start >= startOffset && (buffer[start].isLetterOrDigit() || buffer[start] == '_')) {
-            start--
-        }
-        val wordStart = start + 1
-        if (wordStart >= idx) return false
-        val word = buffer.subSequence(wordStart, idx).toString()
-        return isPascalCase(word)
-    }
-
     /**
-     * Matches `key_token` or `inline_tag_key` in the v0.3.0 grammar:
-     * - First token on a line (`unified_node`)
-     * - Field key inside `inline_form` / `attached_props` (`{key val, key2 val2}`)
-     * - Token after algebra operator (`& Mixin`, `/ debug`)
-     * - Inline stream child tag (`b[bold]`, `span{class x}[text]`)
+     * Context-aware check for whether a token is a `KEY`:
+     * 1. Inside `(` Tuple (1D list like `tags (` or 2D table like `vocabulary (`): NEVER a key! Always value/text!
+     * 2. Inside `{` Form (inline `{k v, k2 v2}` or block `User {`): first token on line or after `{` / `,` (when followed by a value) IS a key!
+     * 3. Inside `[` Stream (or Root Stream): plain text prose lines are NEVER keys (`Razomy Notation` -> green text!).
+     *    A line in a Stream only starts with a `KEY` if that line opens a structural block (`meta {`, `vocabulary (`, `valid_user UserForm{`, `code Ts"`).
      */
-    private fun isKeyTokenPosition(startIdx: Int, endIdx: Int): Boolean {
-        // Inline child tag or attached props/slots: `b[bold]`, `div{class card}(slot)`
-        if (endIdx < endOffset && (buffer[endIdx] == '[' || buffer[endIdx] == '{' || buffer[endIdx] == '(')) {
+    private fun isKeyTokenPosition(word: String, startIdx: Int, endIdx: Int): Boolean {
+        val mode = currentBlockMode()
+
+        // Inside a Tuple `(` (e.g. `tags ( ONTOLOGICAL-DATA` or `(rust, ontology, rn`), items are NEVER keys!
+        if (mode == '(') {
+            return false
+        }
+
+        // Attached inline props/slots on a lowercase identifier: `div{class card}`
+        if (endIdx < endOffset && (buffer[endIdx] == '{' || buffer[endIdx] == '(') && !isPascalCaseType(word)) {
             return true
         }
-        var i = startIdx - 1
-        while (i >= startOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
-            i--
+
+        var prev = startIdx - 1
+        while (prev >= startOffset && (buffer[prev] == ' ' || buffer[prev] == '\t')) {
+            prev--
         }
-        if (i < startOffset || buffer[i] == '\n' || buffer[i] == '{') return true
-        if (buffer[i] == '&' || buffer[i] == '^' || buffer[i] == '/') return true
+
+        // Token right after algebra operator: `/ debug`
+        if (prev >= startOffset && buffer[prev] == '/') {
+            return true
+        }
+
+        // Inside inline `{ key val, key2 val2 }`
+        if (inlineBracketStack.lastOrNull() == '{') {
+            if (prev >= startOffset && (buffer[prev] == '{' || buffer[prev] == ',')) {
+                // Ensure there is a value after this key before `,` or `}`
+                var next = endIdx
+                while (next < endOffset && (buffer[next] == ' ' || buffer[next] == '\t')) next++
+                return next < endOffset && buffer[next] != ',' && buffer[next] != '}' && buffer[next] != '\n'
+            }
+            return false
+        }
+
+        // At start of line:
+        if (prev < startOffset || buffer[prev] == '\n') {
+            if (mode == '{') {
+                // Inside a `{` Form block, every line is a `Key Value` entry
+                return true
+            }
+            // Inside Root Stream or `[` Stream: only highlight as KEY if this line opens a structural block (`{`, `(`, `[`, `Type"`, `&`)
+            return lineOpensStructuralNode(endIdx)
+        }
+
+        return false
+    }
+
+    private fun lineOpensStructuralNode(afterFirstWordIdx: Int): Boolean {
+        var i = afterFirstWordIdx
+        while (i < endOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
+            i++
+        }
+        if (i >= endOffset || buffer[i] == '\n') return false
+
+        // Direct delimiter after space: `meta {`, `vocabulary (`, `steps [`
+        val ch = buffer[i]
+        if ((ch == '{' || ch == '(' || ch == '[') && isEndOfLineDelimiter(i)) {
+            return true
+        }
+        if (ch == '"' && isEndOfLineQuote(i)) {
+            return true
+        }
+        // Algebra operator: `prod & base {`
+        if ((ch == '&' || ch == '^' || ch == '/') && isAlgebraOperatorContext(i)) {
+            return true
+        }
+        // Type constructor after key: `valid_user UserForm{`, `query Sql(`, `code Ts"`
+        if (ch in 'A'..'Z') {
+            var p = i
+            while (p < endOffset && (buffer[p].isLetterOrDigit() || buffer[p] == '_')) p++
+            if (p > i && p < endOffset) {
+                val nextC = buffer[p]
+                if ((nextC == '{' || nextC == '(' || nextC == '[') && isEndOfLineDelimiter(p)) return true
+                if (nextC == '"' && isEndOfLineQuote(p)) return true
+            }
+        }
         return false
     }
 
@@ -481,15 +587,19 @@ class RnLexer : LexerBase() {
      * or at the start of a schema definition (`UserForm {`).
      */
     private fun isSchemaTypePosition(startIdx: Int, endIdx: Int): Boolean {
+        // In a plain Stream prose line (not opening a block), PascalCase words like `Razomy` or `Notation` are plain text!
+        if (currentBlockMode() == '[' && !isAtStartOfLineOrIndent(startIdx) && !lineOpensStructuralNode(endIdx)) {
+            return false
+        }
         if (isDirectlyFollowedByPentad(endIdx)) return true
-        if (endIdx < endOffset && buffer[endIdx] == '?') return true
-        val knownScalarTypes = setOf(
-            "Str", "String", "Text", "Int", "Integer", "Float", "Num", "Decimal",
-            "Bool", "Boolean", "Uuid", "Email", "Date", "DateTime", "Timestamp",
-            "Enum", "List", "Map", "Set", "Any", "Md", "Sql", "Html", "Scss", "Json", "Ts", "Sh"
-        )
         val word = buffer.subSequence(startIdx, endIdx).toString()
-        if (word in knownScalarTypes) return true
+        if (word in RnGrammarParser.BUILTIN_SCALAR_AND_SCHEMA_TYPES && currentBlockMode() != '[') return true
+
+        // After `&` algebra operator (e.g. `& Optional`, `& Auditable`)
+        var prev = startIdx - 1
+        while (prev >= startOffset && (buffer[prev] == ' ' || buffer[prev] == '\t')) prev--
+        if (prev >= startOffset && (buffer[prev] == '&' || buffer[prev] == '^')) return true
+
         // Schema definition header: `UserForm {`
         var p = endIdx
         while (p < endOffset && (buffer[p] == ' ' || buffer[p] == '\t')) p++
@@ -671,7 +781,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
         val TAG = createTextAttributesKey("RN_TAG", DefaultLanguageHighlighterColors.MARKUP_TAG)
         val SCHEMA_PORTAL = createTextAttributesKey("RN_SCHEMA_PORTAL", DefaultLanguageHighlighterColors.CLASS_NAME)
         val SCHEMA_TYPE = createTextAttributesKey("RN_SCHEMA_TYPE", DefaultLanguageHighlighterColors.CLASS_REFERENCE)
-        val SYMBOL = createTextAttributesKey("RN_SYMBOL", DefaultLanguageHighlighterColors.CONSTANT)
+        val SYMBOL = createTextAttributesKey("RN_SYMBOL", DefaultLanguageHighlighterColors.VALID_STRING_ESCAPE)
         val TYPED_LITERAL = createTextAttributesKey("RN_TYPED_LITERAL", DefaultLanguageHighlighterColors.METADATA)
         val STRING = createTextAttributesKey("RN_STRING", DefaultLanguageHighlighterColors.STRING)
         val COL0_RAW = createTextAttributesKey("RN_COL0_RAW", DefaultLanguageHighlighterColors.DOC_COMMENT)
@@ -778,13 +888,7 @@ class RnFoldingBuilder : FoldingBuilderEx() {
             val trimmed = trimmedRight.trim()
             val indent = RnGrammarParser.getIndent(rawLine)
             val firstWord = trimmed.takeWhile { !it.isWhitespace() && it != '[' && it != '{' && it != '(' }
-            val headingLevel = when (firstWord) {
-                "title", "h1" -> 1
-                "part", "subtitle", "h2" -> 2
-                "section", "h3" -> 3
-                "topic", "h4" -> 4
-                else -> 0
-            }
+            val headingLevel = RnGrammarParser.I18nMdKeywords.getHeadingLevel(firstWord)
             if (headingLevel > 0 && (trimmed.length == firstWord.length || trimmed[firstWord.length].isWhitespace())) {
                 headings.add(HeadingEntry(lineIdx, headingLevel, indent, trimmed))
             }
@@ -899,7 +1003,10 @@ object RnTableFormatter {
 
         while (i < result.size) {
             val line = result[i]
-            val trimmedRight = line.trimEnd('\r', ' ', '\t')
+            var trimmedRight = line.trimEnd('\r', ' ', '\t')
+            val indentLen = getIndentLength(trimmedRight)
+            val indentStr = if (indentLen <= trimmedRight.length) trimmedRight.substring(0, indentLen) else ""
+            val trimmed = trimmedRight.trim()
 
             // 1. Skip Column-0 Raw Multiline Strings `(Type)?(N)?"` so their literal content is never touched
             val col0Rank = detectCol0RawOpenerRank(trimmedRight)
@@ -917,8 +1024,8 @@ object RnTableFormatter {
             }
 
             // 2. Skip Block Comments (`#` at EOL)
-            if (trimmedRight.trim() == "#") {
-                val baseIndent = getIndentLength(line)
+            if (trimmed == "#") {
+                val baseIndent = indentLen
                 i++
                 while (i < result.size) {
                     val sub = result[i]
@@ -928,10 +1035,36 @@ object RnTableFormatter {
                 continue
             }
 
-            // 3. Detect Tuple block opener `(` or `Type(` at EOL
+            // 3. Normalize inline comment spacing at start of line (`#dsfsd` -> `# dsfsd`)
+            if (trimmed.startsWith("#") && !trimmed.startsWith("# ") && trimmed.length > 1) {
+                val afterHash = trimmed.substring(1)
+                val isHexColor = afterHash.length == 6 && afterHash.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                if (!isHexColor && !afterHash[0].isDigit()) {
+                    trimmedRight = "$indentStr# ${afterHash.trimStart()}"
+                    result[i] = trimmedRight
+                }
+            }
+
+            // 4. Lifehack for Cyrillic keyboards: convert trailing ` х` -> ` [` and ` Х` -> ` {` on block openers
+            if (trimmedRight.endsWith(" х") || trimmedRight.endsWith(" Х")) {
+                val replacement = if (trimmedRight.endsWith(" х")) " [" else " {"
+                trimmedRight = trimmedRight.dropLast(2) + replacement
+                result[i] = trimmedRight
+            }
+
+            // 5. Detect Form block opener `{` at EOL -> align direct scalar key-value pairs cleanly
             val codePart = stripInlineComment(trimmedRight).trimEnd()
+            if (codePart.endsWith("{")) {
+                val parentIndent = getIndentLength(trimmedRight)
+                val blockEnd = findBlockEnd(result, i, parentIndent)
+                if (blockEnd > i) {
+                    formatFormKeyValueAlignment(result, i + 1, blockEnd)
+                }
+            }
+
+            // 6. Detect Tuple block opener `(` or `Type(` at EOL
             if (codePart.endsWith("(")) {
-                val parentIndent = getIndentLength(line)
+                val parentIndent = getIndentLength(trimmedRight)
                 val blockEnd = findBlockEnd(result, i, parentIndent)
                 if (blockEnd > i) {
                     formatTupleIf2DTable(result, i + 1, blockEnd)
@@ -942,6 +1075,49 @@ object RnTableFormatter {
         }
 
         return result.joinToString("\n")
+    }
+
+    /**
+     * Aligns consecutive scalar `Key Value` rows inside a `{` Form block while preserving single-space header lines.
+     */
+    private fun formatFormKeyValueAlignment(lines: MutableList<String>, startLine: Int, endLine: Int) {
+        var firstChildIdx = -1
+        for (idx in startLine..endLine) {
+            if (lines[idx].isNotBlank() && !lines[idx].trim().startsWith("#")) {
+                firstChildIdx = idx
+                break
+            }
+        }
+        if (firstChildIdx == -1) return
+        val childIndent = getIndentLength(lines[firstChildIdx])
+
+        data class FormEntry(val lineIdx: Int, val indentStr: String, val key: String, val value: String)
+        val entries = mutableListOf<FormEntry>()
+
+        for (idx in firstChildIdx..endLine) {
+            val raw = lines[idx].trimEnd('\r', ' ', '\t')
+            if (raw.isBlank()) continue
+            val ind = getIndentLength(raw)
+            if (ind != childIndent) continue
+            val trimmed = raw.trim()
+            if (trimmed.startsWith("#")) continue
+            val key = trimmed.takeWhile { !it.isWhitespace() }
+            val rest = trimmed.substring(key.length).trimStart()
+            if (key.isEmpty() || rest.isEmpty() || rest == "{" || rest == "(" || rest == "[") continue
+            entries.add(FormEntry(idx, raw.substring(0, ind), key, rest))
+        }
+
+        if (entries.size < 2) return
+        // Only align if the user already used 2+ alignment spaces on at least one row, otherwise normalize to 1 space
+        val hasMultiSpaceAlign = entries.any { e ->
+            val afterKey = lines[e.lineIdx].trim().substring(e.key.length)
+            afterKey.startsWith("  ")
+        }
+        val maxKeyLen = entries.maxOf { it.key.length }
+        for (e in entries) {
+            val pad = if (hasMultiSpaceAlign) (maxKeyLen - e.key.length + 1).coerceAtLeast(1) else 1
+            lines[e.lineIdx] = "${e.indentStr}${e.key}${" ".repeat(pad)}${e.value}"
+        }
     }
 
     /**
@@ -1234,28 +1410,33 @@ class RnColorSettingsPage : ColorSettingsPage {
         AttributesDescriptor("Key Name", RnSyntaxHighlighter.KEY),
         AttributesDescriptor("Markup / Stream Tag (b[...], a(...)[...], ul [)", RnSyntaxHighlighter.TAG),
         AttributesDescriptor("Attached Type Constructor (Sql(, Html[, Scss{)", RnSyntaxHighlighter.SCHEMA_PORTAL),
-        AttributesDescriptor("Schema Type Definition (Uuid, Int, Str)", RnSyntaxHighlighter.SCHEMA_TYPE),
-        AttributesDescriptor("Symbol ('pk, 'GET)", RnSyntaxHighlighter.SYMBOL),
-        AttributesDescriptor("Typed Literal (Date\"...\")", RnSyntaxHighlighter.TYPED_LITERAL),
-        AttributesDescriptor("String", RnSyntaxHighlighter.STRING),
+        AttributesDescriptor("Schema Type Definition (Uuid, Int, Str, Optional)", RnSyntaxHighlighter.SCHEMA_TYPE),
+        AttributesDescriptor("Symbol Literal ('pk, 'admin)", RnSyntaxHighlighter.SYMBOL),
+        AttributesDescriptor("Typed Literal, Currency, Email & URL (Usd123.46, Regex\"...\", Email, Url)", RnSyntaxHighlighter.TYPED_LITERAL),
+        AttributesDescriptor("String & Stream Text", RnSyntaxHighlighter.STRING),
         AttributesDescriptor("Column-0 Raw String", RnSyntaxHighlighter.COL0_RAW),
         AttributesDescriptor("Number", RnSyntaxHighlighter.NUMBER),
         AttributesDescriptor("Keyword / Boolean / None", RnSyntaxHighlighter.KEYWORD),
-        AttributesDescriptor("Algebra & Optional Operator (&, ^, /, ?)", RnSyntaxHighlighter.OPERATOR),
+        AttributesDescriptor("Algebraic Operator (&, ^, /)", RnSyntaxHighlighter.OPERATOR),
         AttributesDescriptor("Symmetric Pentad Bracket ([], {}, ())", RnSyntaxHighlighter.BRACKET)
     )
 
     override fun getIcon(): Icon = RnIcons.FILE
     override fun getHighlighter(): SyntaxHighlighter = RnSyntaxHighlighter()
     override fun getDemoText(): String = """
-        # Razomy Notation (.rn) v0.3.0 — Universal Node & Schema Sample
+        # Razomy Notation (.rn) v1.0.0 — Universal Node & Schema Sample
         #
          Multiline block comment (5th Pentad member)!
          Auto-closed on dedent with zero '#' on inner lines.
-        User{table "users"}(1, 2) & Auditable / debug {
+        UserForm & Auditable / debug {
          id Uuid{'pk}
-         age Int(18, 120){default 18}
-         bio Str
+         username Str{min 3, max 20, pattern Regex"^[a-z0-9_]+$"}
+         email Email{label "Work Email"}
+         age Int{min 18, max 120, default 25}
+         balance Usd{min 0, default Usd123.46}
+         bio Str & Optional {max 500, default None}
+         role 'admin
+         website https://www.razomy.org
          created_at Date"2026-03-30"
          fallback None
          welcome_msg Ts1"
@@ -1381,29 +1562,30 @@ class RnVisualNumberingHintsProvider : InlayHintsProvider<NoSettings> {
                     val indent = getIndent(rawLine)
                     val firstWord = trimmed.takeWhile { !it.isWhitespace() && it != '[' && it != '{' && it != '(' }
 
-                    // 3. Markdown Headings: `part`, `section`, `topic` -> `1.`, `1.1.`, `1.1.1.`
-                    when (firstWord) {
-                        "part" -> {
+                    // 3. Markdown Headings: `part`, `section`, `topic` (including Top 20 languages + Ukrainian) -> `1.`, `1.1.`, `1.1.1.`
+                    val firstWordLower = firstWord.lowercase()
+                    when {
+                        firstWordLower in RnGrammarParser.I18nMdKeywords.PART_H2 && firstWordLower != "subtitle" && firstWordLower != "підзаголовок" && firstWordLower != "подзаголовок" -> {
                             partCounter++
                             sectionCounter = 0
                             topicCounter = 0
-                            val kwEndOffset = lineStart + indent + "part".length
-                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("part").trimStart())
+                            val kwEndOffset = lineStart + indent + firstWord.length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.substring(firstWord.length).trimStart())
                             if (!cleanAfter.alreadyNumbered) {
                                 addBadge(sink, factory, kwEndOffset, " $partCounter.")
                             }
                         }
-                        "section" -> {
+                        firstWordLower in RnGrammarParser.I18nMdKeywords.SECTION_H3 -> {
                             sectionCounter++
                             topicCounter = 0
                             val label = if (partCounter > 0) "$partCounter.$sectionCounter." else "$sectionCounter."
-                            val kwEndOffset = lineStart + indent + "section".length
-                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("section").trimStart())
+                            val kwEndOffset = lineStart + indent + firstWord.length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.substring(firstWord.length).trimStart())
                             if (!cleanAfter.alreadyNumbered) {
                                 addBadge(sink, factory, kwEndOffset, " $label")
                             }
                         }
-                        "topic" -> {
+                        firstWordLower in RnGrammarParser.I18nMdKeywords.TOPIC_H4 -> {
                             topicCounter++
                             val label = when {
                                 partCounter > 0 && sectionCounter > 0 -> "$partCounter.$sectionCounter.$topicCounter."
@@ -1411,17 +1593,17 @@ class RnVisualNumberingHintsProvider : InlayHintsProvider<NoSettings> {
                                 partCounter > 0 -> "$partCounter.$topicCounter."
                                 else -> "$topicCounter."
                             }
-                            val kwEndOffset = lineStart + indent + "topic".length
-                            val cleanAfter = stripManualLeadingNumber(trimmed.removePrefix("topic").trimStart())
+                            val kwEndOffset = lineStart + indent + firstWord.length
+                            val cleanAfter = stripManualLeadingNumber(trimmed.substring(firstWord.length).trimStart())
                             if (!cleanAfter.alreadyNumbered) {
                                 addBadge(sink, factory, kwEndOffset, " $label")
                             }
                         }
                     }
 
-                    // 4. Ordered Lists `ol [` -> `1.`, `2.`, `2.1.`
+                    // 4. Ordered Lists `ol [` / `нум [` -> `1.`, `2.`, `2.1.`
                     val codePart = trimmedRight.substringBefore(" #").trimEnd()
-                    if (firstWord == "ol" && codePart.endsWith("[")) {
+                    if (firstWordLower in RnGrammarParser.I18nMdKeywords.OL_LIST && codePart.endsWith("[")) {
                         val blockEnd = findBlockEnd(document, line, indent)
                         if (blockEnd > line) {
                             numberOrderedListBlock(document, line + 1, blockEnd, indent, "", sink, factory)

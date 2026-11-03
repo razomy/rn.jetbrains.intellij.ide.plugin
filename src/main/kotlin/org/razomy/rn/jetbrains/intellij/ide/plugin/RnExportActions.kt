@@ -35,3 +35,34 @@ class ExportRnToProtoAction : BaseRnExportAction(ExportTargetFormat.PROTO)
 class ExportRnToMermaidAction : BaseRnExportAction(ExportTargetFormat.MERMAID)
 class ExportRnToCsvAction : BaseRnExportAction(ExportTargetFormat.CSV)
 class FormatRnCanonicalAction : BaseRnExportAction(ExportTargetFormat.RN_FMT)
+
+/**
+ * Converts `.json`, `.yaml`, `.yml`, `.csv`, `.tsv`, `.env`, `.properties`, or `.md` files into `.rn`.
+ */
+class ConvertFileToRnAction : AnAction(
+    "Convert File to Razomy Notation (.rn)",
+    "Convert JSON, YAML, CSV, .env, .properties, or Markdown file to Razomy Notation (.rn)",
+    RnIcons.FILE
+) {
+    private val supportedExtensions = setOf("json", "json5", "yaml", "yml", "csv", "tsv", "env", "properties", "ini", "md", "markdown")
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
+    override fun update(e: AnActionEvent) {
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        val ext = file?.extension?.lowercase()
+        e.presentation.isEnabledAndVisible = e.project != null && (ext in supportedExtensions || file?.name == ".env")
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        if (file != null && !file.isDirectory) {
+            val text = String(file.contentsToByteArray(), Charsets.UTF_8)
+            RnExporterService.importFileToRnDisk(project, file, text, openInEditor = true)
+            return
+        }
+        val active = RnExporterService.getActiveFileAndText(project) ?: return
+        RnExporterService.importFileToRnDisk(project, active.first, active.second, openInEditor = true)
+    }
+}
