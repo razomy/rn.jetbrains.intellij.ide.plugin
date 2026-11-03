@@ -446,16 +446,22 @@ object RnGrammarParser {
                 continue
             }
 
-            // 3. Check for standalone closing brackets on a line (Forbidden by Axiom 2: Block mode never uses closing brackets)
-            if (trimmed == "}" || trimmed == "]" || trimmed == ")") {
+            // 3. Check for standalone closing brackets on a line:
+            // Allowed in Draft / Bracket Mode and automatically stripped + normalized to 1-space indent on Reformat Code (Ctrl+Alt+L)!
+            if (trimmed == "}" || trimmed == "]" || trimmed == ")" ||
+                trimmed == "}," || trimmed == "]," || trimmed == "),"
+            ) {
                 diagnostics.add(
                     RnDiagnostic(
                         i,
                         lineStart + getIndent(rawLine),
                         lineEnd,
-                        "Axiom 2 Violation: Closing bracket '$trimmed' is never used on its own line in .rn (blocks auto-close on dedent)"
+                        "Optional closing bracket '$trimmed': press Ctrl+Alt+L (Cmd+Option+L) to auto-format into canonical bracketless .rn",
+                        RnDiagnostic.Severity.WARNING
                     )
                 )
+                i++
+                continue
             }
 
             // 4. Check for unclosed inline quotes on a single line (when not a Col-0 opener)
@@ -670,7 +676,7 @@ object RnGrammarParser {
         schemas.putAll(externalSchemas)
         schemas.putAll(extractSchemasFromText(text))
 
-        // Check if `meta { schema SomeSchema }` is declared at top of file
+        // Check if `meta { schema SomeSchema }` is declared at top of file (supports `./models.rl/UserForm` and `./models.rl#UserForm`)
         var fileDefaultSchema: String? = null
         if (lines.isNotEmpty() && stripInlineComment(lines[0]).trim() == "meta {") {
             val metaEnd = findBlockEnd(lines, 0, getIndent(lines[0]))
@@ -678,7 +684,7 @@ object RnGrammarParser {
                 val mLine = stripInlineComment(lines[m]).trim()
                 if (mLine.startsWith("schema ")) {
                     val rawRef = mLine.removePrefix("schema").trim().removeSurrounding("\"")
-                    val targetSchema = rawRef.substringAfterLast('#').substringAfterLast('/').removeSuffix(".rn")
+                    val targetSchema = extractSchemaNameFromPathOrRef(rawRef)
                     if (isPascalCase(targetSchema)) {
                         fileDefaultSchema = targetSchema
                         if (targetSchema !in schemas && targetSchema !in BUILTIN_SCALAR_AND_SCHEMA_TYPES) {
@@ -734,19 +740,19 @@ object RnGrammarParser {
             val indent = getIndent(rawLine)
 
             // Forbid `Type?` syntax everywhere and suggest `& Optional`
-            val forbiddenQMatch = Regex("""\b([A-Z][A-Za-z0-9_]*)\?""").find(cleanEnd)
-            if (forbiddenQMatch != null) {
-                val typeName = forbiddenQMatch.groupValues[1]
-                diagnostics.add(
-                    RnDiagnostic(
-                        i,
-                        lineOffsets[i] + indent,
-                        lineOffsets[i] + rawLine.length,
-                        "Operator '?' ('$typeName?') is not used in Razomy Notation. Use '$typeName & Optional' instead.",
-                        RnDiagnostic.Severity.ERROR
-                    )
-                )
-            }
+//            val forbiddenQMatch = Regex("""\b([A-Z][A-Za-z0-9_]*)\?""").find(cleanEnd)
+//            if (forbiddenQMatch != null) {
+//                val typeName = forbiddenQMatch.groupValues[1]
+//                diagnostics.add(
+//                    RnDiagnostic(
+//                        i,
+//                        lineOffsets[i] + indent,
+//                        lineOffsets[i] + rawLine.length,
+//                        "Operator '?' ('$typeName?') is not used in Razomy Notation. Use '$typeName & Optional' instead.",
+//                        RnDiagnostic.Severity.ERROR
+//                    )
+//                )
+//            }
 
             if (cleanEnd.endsWith("{")) {
                 val header = cleanEnd.dropLast(1).trim()
@@ -755,7 +761,7 @@ object RnGrammarParser {
 
                 if (parts.size >= 2 && parts[1] != "&" && parts[1] != "^" && parts[1] != "/") {
                     val rawTypeToken = parts.last()
-                    val resolvedType = rawTypeToken.substringAfterLast('#')
+                    val resolvedType = extractSchemaNameFromPathOrRef(rawTypeToken)
                     if (isPascalCase(resolvedType)) {
                         val schemaFields = schemas[resolvedType]
                         if (schemaFields != null) {
@@ -1584,6 +1590,15 @@ object RnGrammarParser {
     fun getIndent(line: String): Int =
         line.takeWhile { it == ' ' || it == '\t' }.length
 
+    fun extractSchemaNameFromPathOrRef(rawRef: String): String {
+        val clean = rawRef.trim().removeSurrounding("\"")
+        if (clean.contains('#')) {
+            return clean.substringAfterLast('#')
+        }
+        val afterSlash = clean.substringAfterLast('/')
+        return afterSlash.removeSuffix(".rn").removeSuffix(".rl")
+    }
+
     fun isPascalCase(s: String): Boolean =
         s.isNotEmpty() && s[0] in 'A'..'Z' && s.any { it in 'a'..'z' } &&
                 s.all { it.isLetterOrDigit() || it == '_' }
@@ -1689,11 +1704,16 @@ object RnGrammarParser {
                         if (keyPrefix != null) sb.append("$pad$keyPrefix {}\n")
                         return
                     }
-                    val childIndent = if (keyPrefix != null) {
-                        sb.append("$pad$keyPrefix {\n")
-                        currentIndent + 1
-                    } else {
-                        currentIndent
+                    val childIndent = when (keyPrefix) {
+                        "{" -> {
+                            sb.append("$pad{\n")
+                            currentIndent + 1
+                        }
+                        null -> currentIndent
+                        else -> {
+                            sb.append("$pad$keyPrefix {\n")
+                            currentIndent + 1
+                        }
                     }
                     while (i < trimmed.length) {
                         skipWs()
@@ -1760,15 +1780,19 @@ object RnGrammarParser {
                         i = savedPos
                         val prefix = if (keyPrefix != null) "$pad$keyPrefix (\n" else "$pad(\n"
                         sb.append(prefix)
-                        var idx = 1
                         while (i < trimmed.length) {
                             skipWs()
                             if (i < trimmed.length && trimmed[i] == ']') {
                                 i++
                                 break
                             }
-                            parseValue(currentIndent + 1, "item_$idx")
-                            idx++
+                            if (trimmed[i] == '{') {
+                                parseValue(currentIndent + 1, "{")
+                            } else if (trimmed[i] == '[') {
+                                parseValue(currentIndent + 1, "(")
+                            } else {
+                                parseValue(currentIndent + 1, null)
+                            }
                             skipWs()
                             if (i < trimmed.length && trimmed[i] == ',') i++
                         }

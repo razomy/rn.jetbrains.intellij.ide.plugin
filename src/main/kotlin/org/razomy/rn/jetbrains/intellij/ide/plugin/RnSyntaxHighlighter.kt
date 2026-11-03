@@ -996,9 +996,209 @@ class RnFoldingBuilder : FoldingBuilderEx() {
  */
 object RnTableFormatter {
 
+    /**
+     * Normalizes Bracket-Drafted `.rn` code (where the user typed explicit `{ ... }`, `( ... )`,
+     * trailing commas `1,`, or arbitrary 2/4-space indentation inside nested arrays/objects)
+     * into canonical 1-space topological `.rn`!
+     *
+     * Priority Rule:
+     * 1. Explicit closing brackets (`}`, `)`, `]`) take highest priority when present (`hasExplicitCloser = true`):
+     *    children inside an explicitly closed block remain inside that block until its closing bracket is reached,
+     *    even if the user wrote children at the same indentation as the opener (`{\n a 1\n}`).
+     * 2. Indentation / Spaces take priority when a block is NOT closed by an explicit bracket (`hasExplicitCloser = false`):
+     *    dedenting back to `<= parent.rawIndent` (including at Column 0, e.g. `meta {\n schema ...\n\nUserForm{`)
+     *    immediately closes the unbracketed scope!
+     */
+    private fun normalizeBracketDraftToCanonical(rawLines: List<String>): MutableList<String> {
+        val out = mutableListOf<String>()
+        data class Scope(
+            val rawIndent: Int,
+            val canonicalIndent: Int,
+            val mode: Char,
+            val hasExplicitCloser: Boolean,
+            var is2DTable: Boolean? = null
+        )
+
+        // Pre-scan matching explicit standalone closing brackets so we know which openers are closed by brackets vs spaces
+        val explicitlyClosedOpeners = findExplicitlyClosedOpenerLines(rawLines)
+
+        val stack = ArrayDeque<Scope>()
+        stack.addLast(Scope(-1, -1, '[', hasExplicitCloser = true))
+
+        var i = 0
+        while (i < rawLines.size) {
+            val rawLine = rawLines[i]
+            val trimmedRight = rawLine.trimEnd('\r', ' ', '\t')
+            val trimmed = trimmedRight.trim()
+
+            // Preserve Column-0 Raw Multiline Strings verbatim
+            val col0Rank = detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                val rawInd = getIndentLength(trimmedRight)
+                while (stack.size > 1 && !stack.last().hasExplicitCloser && rawInd <= stack.last().rawIndent) {
+                    stack.removeLast()
+                }
+                val canInd = (stack.last().canonicalIndent + 1).coerceAtLeast(0)
+                out.add(" ".repeat(canInd) + trimmed)
+                i++
+                while (i < rawLines.size) {
+                    val sub = rawLines[i].trimEnd('\r')
+                    out.add(sub)
+                    if (sub.trimEnd(' ', '\t') == closeMarker) break
+                    i++
+                }
+                i++
+                continue
+            }
+
+            if (trimmed.isEmpty()) {
+                out.add("")
+                i++
+                continue
+            }
+
+            // Priority 1: Standalone closing brackets `}`, `)`, `]`, `},`, `),`, `],` pop up to the matching explicitly closed scope
+            if (trimmed == "}" || trimmed == ")" || trimmed == "]" ||
+                trimmed == "}," || trimmed == ")," || trimmed == "],"
+            ) {
+                val expectedOpen = when (trimmed.first()) {
+                    '}' -> '{'
+                    ')' -> '('
+                    ']' -> '['
+                    else -> ' '
+                }
+                while (stack.size > 1 && !stack.last().hasExplicitCloser) {
+                    stack.removeLast()
+                }
+                if (stack.size > 1 && stack.last().mode == expectedOpen) {
+                    stack.removeLast()
+                } else if (stack.size > 1) {
+                    stack.removeLast()
+                }
+                i++
+                continue
+            }
+
+            val rawInd = getIndentLength(trimmedRight)
+            // Priority 2: For blocks without an explicit closing bracket, dedenting to `<= rawIndent` (even at 0!) pops the scope
+            while (stack.size > 1 && !stack.last().hasExplicitCloser && rawInd <= stack.last().rawIndent) {
+                stack.removeLast()
+            }
+
+            val parentScope = stack.last()
+            val canInd = (parentScope.canonicalIndent + 1).coerceAtLeast(0)
+            var cleanLine = trimmed
+
+            // Normalize legacy `#Schema` path separator to `/Schema` in `schema ./models.rl#UserForm` -> `schema ./models.rl/UserForm`
+            if (cleanLine.startsWith("schema ") && cleanLine.contains("#")) {
+                val codeOnly = stripInlineComment(cleanLine)
+                val commentSuffix = cleanLine.substring(codeOnly.length)
+                cleanLine = codeOnly.replace('#', '/') + commentSuffix
+            }
+
+            // Inside a 1D Tuple `(`, strip trailing comma (`1,` -> `1`, `{ a 3 },` -> `{ a 3 }`)
+            if (parentScope.mode == '(') {
+                val codeOnly = stripInlineComment(cleanLine).trimEnd()
+                if (parentScope.is2DTable == null && !codeOnly.startsWith("#")) {
+                    val withoutTrailingComma = codeOnly.removeSuffix(",").trim()
+                    val splitCheck = RnGrammarParser.splitTableRow(withoutTrailingComma, expectedCols = -1)
+                    parentScope.is2DTable = splitCheck.first.size >= 2 && !codeOnly.endsWith(",")
+                }
+                if (parentScope.is2DTable == false && codeOnly.endsWith(",") && !codeOnly.endsWith(",,")) {
+                    val commentSuffix = cleanLine.substring(codeOnly.length)
+                    cleanLine = codeOnly.dropLast(1).trimEnd() + commentSuffix
+                }
+            }
+
+            out.add(" ".repeat(canInd) + cleanLine)
+
+            val finalCodePart = stripInlineComment(cleanLine).trimEnd()
+            if (finalCodePart.endsWith("{") || finalCodePart.endsWith("(") || finalCodePart.endsWith("[") || cleanLine == "#") {
+                val modeChar = if (cleanLine == "#") '#' else finalCodePart.last()
+                val hasCloser = i in explicitlyClosedOpeners
+                stack.addLast(Scope(rawInd, canInd, modeChar, hasExplicitCloser = hasCloser))
+            }
+
+            i++
+        }
+
+        // Remove root wrapper `{` if used at line 0
+        if (out.isNotEmpty() && out.first().trim() == "{") {
+            out.removeAt(0)
+            for (idx in out.indices) {
+                if (out[idx].startsWith(" ")) {
+                    out[idx] = out[idx].substring(1)
+                }
+            }
+        }
+
+        return out
+    }
+
+    /**
+     * Pre-scans lines to find which block-opening lines (`{`, `(`, `[`) are matched by an explicit
+     * standalone closing bracket line (`}`, `)`, `]`), respecting indentation when unclosed blocks intervene.
+     */
+    private fun findExplicitlyClosedOpenerLines(rawLines: List<String>): Set<Int> {
+        data class Candidate(val lineIdx: Int, val rawIndent: Int, val mode: Char)
+        val closedLines = mutableSetOf<Int>()
+        val openStack = ArrayDeque<Candidate>()
+
+        var i = 0
+        while (i < rawLines.size) {
+            val trimmedRight = rawLines[i].trimEnd('\r', ' ', '\t')
+            val trimmed = trimmedRight.trim()
+
+            val col0Rank = detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                i++
+                while (i < rawLines.size && rawLines[i].trimEnd('\r', ' ', '\t') != closeMarker) {
+                    i++
+                }
+                i++
+                continue
+            }
+
+            if (trimmed.isEmpty()) {
+                i++
+                continue
+            }
+
+            if (trimmed == "}" || trimmed == ")" || trimmed == "]" ||
+                trimmed == "}," || trimmed == ")," || trimmed == "],"
+            ) {
+                val expectedOpen = when (trimmed.first()) {
+                    '}' -> '{'
+                    ')' -> '('
+                    ']' -> '['
+                    else -> ' '
+                }
+                val matchIdx = openStack.indexOfLast { it.mode == expectedOpen }
+                if (matchIdx >= 0) {
+                    val matched = openStack[matchIdx]
+                    closedLines.add(matched.lineIdx)
+                    while (openStack.size > matchIdx) {
+                        openStack.removeLast()
+                    }
+                }
+                i++
+                continue
+            }
+
+            val codePart = stripInlineComment(trimmedRight).trimEnd()
+            if (codePart.endsWith("{") || codePart.endsWith("(") || codePart.endsWith("[")) {
+                openStack.addLast(Candidate(i, getIndentLength(trimmedRight), codePart.last()))
+            }
+            i++
+        }
+        return closedLines
+    }
+
     fun formatDocument(text: String): String {
         val lines = text.split("\n")
-        val result = lines.toMutableList()
+        val result = normalizeBracketDraftToCanonical(lines)
         var i = 0
 
         while (i < result.size) {

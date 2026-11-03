@@ -213,25 +213,118 @@ object RnExporterService {
     }
 
     private fun builtinToJson(lines: List<String>): String {
-        val entries = mutableListOf<String>()
-        for (raw in lines) {
-            val t = raw.trim()
-            if (t.isEmpty() || t.startsWith("#")) continue
-            val clean = t.removeSuffix("{").removeSuffix("(").removeSuffix("[").trim()
-            val parts = clean.split(Regex("\\s+"), limit = 2)
-            if (parts.size == 2) {
-                val k = parts[0].trim('"')
-                val v = parts[1]
-                val jsonVal = when {
-                    v == "true" || v == "false" || v == "null" -> v
-                    v.toDoubleOrNull() != null -> v
-                    v.startsWith("\"") && v.endsWith("\"") -> v
-                    else -> "\"${v.replace("\"", "\\\"")}\""
+        val normalized = RnTableFormatter.formatDocument(lines.joinToString("\n")).lines()
+
+        fun scalarToJson(raw: String): String {
+            val v = raw.trim().removeSuffix(",").trim()
+            return when {
+                v.isEmpty() || v == "None" || v == "null" -> "null"
+                v == "true" || v == "false" -> v
+                v.toDoubleOrNull() != null -> v
+                v.startsWith("'") && v.length > 1 -> "\"${v.substring(1)}\""
+                v.startsWith("\"") && v.endsWith("\"") -> v
+                v.startsWith("{") && v.endsWith("}") -> {
+                    val inner = v.substring(1, v.length - 1).trim()
+                    if (inner.isEmpty()) "{}" else {
+                        val pairs = inner.split(',').mapNotNull { p ->
+                            val kv = p.trim().split(Regex("\\s+"), limit = 2)
+                            if (kv.size == 2) "\"${kv[0].trim('\"')}\": ${scalarToJson(kv[1])}"
+                            else if (kv.size == 1 && kv[0].isNotEmpty()) "\"${kv[0].trim('\"')}\": null"
+                            else null
+                        }
+                        "{ ${pairs.joinToString(", ")} }"
+                    }
                 }
-                entries.add("  \"$k\": $jsonVal")
+                v.startsWith("(") && v.endsWith(")") -> {
+                    val inner = v.substring(1, v.length - 1).trim()
+                    if (inner.isEmpty()) "[]" else {
+                        val items = inner.split(',').map { scalarToJson(it.trim()) }
+                        "[${items.joinToString(", ")}]"
+                    }
+                }
+                else -> "\"${v.replace("\"", "\\\"")}\""
             }
         }
-        return "{\n${entries.joinToString(",\n")}\n}\n"
+
+        fun renderBlock(startLine: Int, endLine: Int, mode: Char, jsonIndent: Int): String {
+            val pad = "  ".repeat(jsonIndent)
+            val childPad = "  ".repeat(jsonIndent + 1)
+            val items = mutableListOf<String>()
+
+            var firstChildIndent = -1
+            for (idx in startLine..endLine) {
+                val raw = normalized[idx]
+                val t = RnGrammarParser.stripInlineComment(raw).trim()
+                if (t.isNotEmpty() && !t.startsWith("#")) {
+                    firstChildIndent = RnGrammarParser.getIndent(raw)
+                    break
+                }
+            }
+            if (firstChildIndent == -1) return if (mode == '(') "[]" else "{}"
+
+            var i = startLine
+            while (i <= endLine) {
+                val raw = normalized[i]
+                val t = RnGrammarParser.stripInlineComment(raw).trim()
+                if (t.isEmpty() || t.startsWith("#") || t == "}" || t == ")" || t == "]") {
+                    i++
+                    continue
+                }
+                val ind = RnGrammarParser.getIndent(raw)
+                if (ind < firstChildIndent) break
+                if (ind > firstChildIndent) {
+                    i++
+                    continue
+                }
+
+                if (mode == '(') {
+                    val cleanItem = t.removeSuffix(",").trim()
+                    if (cleanItem == "{" || cleanItem == "(" || cleanItem == "[") {
+                        val subEnd = RnGrammarParser.findBlockEnd(normalized, i, ind).coerceAtMost(endLine)
+                        val subMode = if (cleanItem == "{") '{' else '('
+                        items.add("$childPad${renderBlock(i + 1, subEnd, subMode, jsonIndent + 1)}")
+                        i = subEnd + 1
+                        continue
+                    } else if (cleanItem.endsWith("{") && !cleanItem.contains("}")) {
+                        val subEnd = RnGrammarParser.findBlockEnd(normalized, i, ind).coerceAtMost(endLine)
+                        items.add("$childPad${renderBlock(i + 1, subEnd, '{', jsonIndent + 1)}")
+                        i = subEnd + 1
+                        continue
+                    } else {
+                        items.add("$childPad${scalarToJson(cleanItem)}")
+                    }
+                } else {
+                    if (t == "{") {
+                        val subEnd = RnGrammarParser.findBlockEnd(normalized, i, ind).coerceAtMost(endLine)
+                        return renderBlock(i + 1, subEnd, '{', jsonIndent)
+                    }
+                    val key = t.takeWhile { !it.isWhitespace() && it != '{' && it != '(' && it != '[' }.trim('"')
+                    val rest = t.substring(key.length).trim()
+                    if (rest.endsWith("{") && !rest.contains("}")) {
+                        val subEnd = RnGrammarParser.findBlockEnd(normalized, i, ind).coerceAtMost(endLine)
+                        items.add("$childPad\"$key\": ${renderBlock(i + 1, subEnd, '{', jsonIndent + 1)}")
+                        i = subEnd + 1
+                        continue
+                    } else if (rest.endsWith("(") && !rest.contains(")")) {
+                        val subEnd = RnGrammarParser.findBlockEnd(normalized, i, ind).coerceAtMost(endLine)
+                        items.add("$childPad\"$key\": ${renderBlock(i + 1, subEnd, '(', jsonIndent + 1)}")
+                        i = subEnd + 1
+                        continue
+                    } else {
+                        items.add("$childPad\"$key\": ${scalarToJson(rest)}")
+                    }
+                }
+                i++
+            }
+
+            return if (mode == '(') {
+                "[\n${items.joinToString(",\n")}\n$pad]"
+            } else {
+                "{\n${items.joinToString(",\n")}\n$pad}"
+            }
+        }
+
+        return renderBlock(0, normalized.lastIndex, '{', 0) + "\n"
     }
 
     private fun builtinToYaml(lines: List<String>): String {

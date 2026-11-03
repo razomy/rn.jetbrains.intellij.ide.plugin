@@ -95,6 +95,10 @@
                 language="RN"
                 implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFileReferenceContributor"/>
 
+        <!-- Smart Auto-Indent on Enter after (, {, [, # -->
+        <enterHandlerDelegate
+                implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnEnterHandlerDelegate"/>
+
         <!-- Settings / Preferences Page (Auto-Export on Save & Validation) -->
         <applicationConfigurable
                 parentId="tools"
