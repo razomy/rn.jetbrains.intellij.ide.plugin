@@ -77,6 +77,8 @@ object RnExporterService {
         sourceFile: VirtualFile?,
         sourceText: String,
         targetFormat: ExportTargetFormat,
+        openInEditor: Boolean = RnSettingsState.getInstance().state.openExportedFileInEditor,
+        silentNotification: Boolean = false,
         onComplete: ((File, String) -> Unit)? = null
     ) {
         val convertedResult = convertRnContent(project, sourceFile, sourceText, targetFormat)
@@ -85,8 +87,19 @@ object RnExporterService {
                 try {
                     val baseDir = sourceFile?.parent?.path ?: project.basePath ?: System.getProperty("user.home")
                     val rawName = sourceFile?.nameWithoutExtension ?: "exported"
-                    val cleanBaseName = rawName.removeSuffix(".md").removeSuffix(".json")
-                        .removeSuffix(".scss").removeSuffix(".sql")
+                    val cleanBaseName = rawName
+                        .removeSuffix(".md")
+                        .removeSuffix(".json")
+                        .removeSuffix(".yaml")
+                        .removeSuffix(".yml")
+                        .removeSuffix(".html")
+                        .removeSuffix(".scss")
+                        .removeSuffix(".css")
+                        .removeSuffix(".sql")
+                        .removeSuffix(".tf")
+                        .removeSuffix(".proto")
+                        .removeSuffix(".mmd")
+                        .removeSuffix(".csv")
                     val outFileName = if (targetFormat == ExportTargetFormat.RN_FMT) {
                         "${cleanBaseName}.formatted.rn"
                     } else {
@@ -96,10 +109,12 @@ object RnExporterService {
                     outFile.writeText(outputText, Charsets.UTF_8)
 
                     val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(outFile)
-                    if (vf != null) {
+                    if (vf != null && openInEditor) {
                         FileEditorManager.getInstance(project).openFile(vf, true)
                     }
-                    notify(project, "Exported ${outFile.name} (${targetFormat.description})", NotificationType.INFORMATION)
+                    if (!silentNotification) {
+                        notify(project, "Exported ${outFile.name} (${targetFormat.description})", NotificationType.INFORMATION)
+                    }
                     onComplete?.invoke(outFile, outputText)
                 } catch (e: Exception) {
                     notify(project, "Failed to write exported file: ${e.message}", NotificationType.ERROR)
@@ -145,8 +160,8 @@ object RnExporterService {
     private fun builtinConvert(source: String, format: ExportTargetFormat): String {
         val lines = source.lines()
         return when (format) {
-            ExportTargetFormat.RN_FMT -> source.trimEnd() + "\n"
-            ExportTargetFormat.MARKDOWN -> builtinToMarkdown(lines)
+            ExportTargetFormat.RN_FMT -> RnTableFormatter.formatDocument(source).trimEnd() + "\n"
+            ExportTargetFormat.MARKDOWN -> RnGrammarParser.convertToMarkdown(source)
             ExportTargetFormat.HTML -> builtinToHtml(lines)
             ExportTargetFormat.YAML -> builtinToYaml(lines)
             ExportTargetFormat.SQL -> builtinToSql(lines)
@@ -197,26 +212,8 @@ object RnExporterService {
         return sb.toString()
     }
 
-    private fun builtinToMarkdown(lines: List<String>): String {
-        val sb = StringBuilder()
-        for (raw in lines) {
-            val t = raw.trim()
-            if (t.isEmpty()) {
-                sb.append("\n")
-                continue
-            }
-            when {
-                t.startsWith("title ") || t.startsWith("part ") ->
-                    sb.append("# ${t.substringAfter(" ")}\n")
-                t.startsWith("section ") || t.startsWith("subtitle ") ->
-                    sb.append("## ${t.substringAfter(" ")}\n")
-                t.startsWith("topic ") ->
-                    sb.append("### ${t.substringAfter(" ")}\n")
-                else -> sb.append("$t\n")
-            }
-        }
-        return sb.toString()
-    }
+    private fun builtinToMarkdown(lines: List<String>): String =
+        RnGrammarParser.convertToMarkdown(lines.joinToString("\n"))
 
     private fun builtinToHtml(lines: List<String>): String {
         val sb = StringBuilder()

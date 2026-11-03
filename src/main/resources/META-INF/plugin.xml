@@ -79,7 +79,35 @@
         <codeInsight.inlayProvider
                 language="RN"
                 implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnVisualNumberingHintsProvider"/>
+
+        <!-- Real-Time Syntax & JSON Schema Validation Annotator -->
+        <annotator
+                language="RN"
+                implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnAnnotator"/>
+
+        <!-- Context-Aware IntelliSense Completion (Md tags, Schema types, Relative & Project file paths) -->
+        <completion.contributor
+                language="RN"
+                implementationClass="org.razomy.rn.jetbrains.intellij.ide.plugin.RnCompletionContributor"/>
+
+        <!-- File Path & Hyperlink Reference Contributor (Ctrl+Click navigation) -->
+        <psi.referenceContributor
+                language="RN"
+                implementation="org.razomy.rn.jetbrains.intellij.ide.plugin.RnFileReferenceContributor"/>
+
+        <!-- Settings / Preferences Page (Auto-Export on Save & Validation) -->
+        <applicationConfigurable
+                parentId="tools"
+                instance="org.razomy.rn.jetbrains.intellij.ide.plugin.RnSettingsConfigurable"
+                id="org.razomy.rn.settings.RnSettingsConfigurable"
+                displayName="Razomy Notation (.rn)"/>
     </extensions>
+
+    <projectListeners>
+        <listener
+                class="org.razomy.rn.jetbrains.intellij.ide.plugin.RnAutoExportSaveListener"
+                topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
+    </projectListeners>
 
     <actions>
         <group id="RN.ExportActionGroup"

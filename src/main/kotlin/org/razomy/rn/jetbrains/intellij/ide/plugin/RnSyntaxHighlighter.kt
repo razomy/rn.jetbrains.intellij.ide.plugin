@@ -56,6 +56,7 @@ class RnElementType(debugName: String) : IElementType(debugName, RnLanguage)
 object RnTypes {
     @JvmField val COMMENT = RnTokenType("COMMENT")
     @JvmField val KEY = RnTokenType("KEY")
+    @JvmField val TAG = RnTokenType("TAG")
     @JvmField val SCHEMA_PORTAL = RnTokenType("SCHEMA_PORTAL")
     @JvmField val SCHEMA_TYPE = RnTokenType("SCHEMA_TYPE")
     @JvmField val SYMBOL = RnTokenType("SYMBOL")
@@ -269,15 +270,18 @@ class RnLexer : LexerBase() {
         val word = buffer.subSequence(tokenStart, tokenEnd).toString()
 
         currentToken = when {
-            word == "true" || word == "false" || word == "None" ||
-                    word in setOf("title", "subtitle", "part", "section", "topic", "quote") -> RnTypes.KEYWORD
+            word == "true" || word == "false" || word == "None" -> RnTypes.KEYWORD
+            word in setOf("title", "subtitle", "part", "section", "topic", "quote", "note", "warn") &&
+                    isAtStartOfLineOrIndent(tokenStart) -> RnTypes.KEYWORD
             isNumberLiteral(word) -> RnTypes.NUMBER
-            // v0.3.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Int(1, 10){label "x"}`)
-            isPascalCase(word) && isDirectlyFollowedByPentad(tokenEnd) -> RnTypes.SCHEMA_PORTAL
-            // v0.3.0 Schema Type Definition (`Uuid{'pk}`, `Str`, `Int(18, 120){default 18}`, `Uuid`)
-            isPascalCase(word) -> RnTypes.SCHEMA_TYPE
+            // Inline or stream markup tag (`b[bold]`, `a(/url)[text]`, `span{class x}[text]`, `ul [`)
+            isInlineOrStreamTag(word, tokenStart, tokenEnd) -> RnTypes.TAG
+            // v1.0.0 Type Constructor attached to Pentad (`Sql(`, `Html[`, `Scss{`, `Int(1, 10){label "x"}`)
+            isPascalCaseType(word) && isDirectlyFollowedByPentad(tokenEnd) -> RnTypes.SCHEMA_PORTAL
+            // v1.0.0 Schema Type Definition (`Uuid{'pk}`, `Str`, `Int(18, 120){default 18}`, `Uuid`)
+            isPascalCaseType(word) && isSchemaTypePosition(tokenStart, tokenEnd) -> RnTypes.SCHEMA_TYPE
             isKeyTokenPosition(tokenStart, tokenEnd) -> RnTypes.KEY
-            else -> RnTypes.TEXT
+            else -> RnTypes.STRING
         }
     }
 
@@ -424,8 +428,75 @@ class RnLexer : LexerBase() {
         )
     }
 
-    private fun isPascalCase(s: String): Boolean {
-        return s.isNotEmpty() && s[0] in 'A'..'Z' && s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '_' }
+    private fun isAtStartOfLineOrIndent(startIdx: Int): Boolean {
+        var i = startIdx - 1
+        while (i >= startOffset && (buffer[i] == ' ' || buffer[i] == '\t')) {
+            i--
+        }
+        return i < startOffset || buffer[i] == '\n'
+    }
+
+    private fun isInlineOrStreamTag(word: String, startIdx: Int, endIdx: Int): Boolean {
+        if (word.isEmpty() || word[0] !in 'a'..'z') return false
+        if (endIdx < endOffset && buffer[endIdx] == '[') return true
+        // Attached props/slots before `[`: `a(/url)[text]`, `span{class x}[text]`
+        if (endIdx < endOffset && (buffer[endIdx] == '{' || buffer[endIdx] == '(')) {
+            var p = endIdx
+            var depth = 0
+            while (p < endOffset && buffer[p] != '\n') {
+                val c = buffer[p]
+                if (c == '{' || c == '(') depth++
+                else if (c == '}' || c == ')') {
+                    depth--
+                    if (depth == 0) {
+                        if (p + 1 < endOffset && buffer[p + 1] == '[') return true
+                        if (p + 1 < endOffset && (buffer[p + 1] == '(' || buffer[p + 1] == '{')) {
+                            p++
+                            continue
+                        }
+                        break
+                    }
+                }
+                p++
+            }
+        }
+        return false
+    }
+
+    /**
+     * Distinguishes true `PascalCase` Type Constructors / Schema Archetypes (`Sql`, `Html`, `Uuid`, `Str`, `UserForm`)
+     * from ALL_CAPS / UPPER-KEBAB string tags like `ONTOLOGICAL-DATA`, `SPACE-LAW`, or prose words inside streams.
+     */
+    private fun isPascalCaseType(s: String): Boolean {
+        if (s.length < 2 || s[0] !in 'A'..'Z') return false
+        if (!s.any { it in 'a'..'z' }) return false
+        return s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '_' }
+    }
+
+    private fun isPascalCase(s: String): Boolean = isPascalCaseType(s)
+
+    /**
+     * Ensures `PascalCase` words in regular prose or 1D string lists (like `tags (`) are highlighted as strings/text
+     * rather than Schema Types, unless they appear as a type after a key (`id Uuid`), inside a 2D schema table,
+     * or at the start of a schema definition (`UserForm {`).
+     */
+    private fun isSchemaTypePosition(startIdx: Int, endIdx: Int): Boolean {
+        if (isDirectlyFollowedByPentad(endIdx)) return true
+        if (endIdx < endOffset && buffer[endIdx] == '?') return true
+        val knownScalarTypes = setOf(
+            "Str", "String", "Text", "Int", "Integer", "Float", "Num", "Decimal",
+            "Bool", "Boolean", "Uuid", "Email", "Date", "DateTime", "Timestamp",
+            "Enum", "List", "Map", "Set", "Any", "Md", "Sql", "Html", "Scss", "Json", "Ts", "Sh"
+        )
+        val word = buffer.subSequence(startIdx, endIdx).toString()
+        if (word in knownScalarTypes) return true
+        // Schema definition header: `UserForm {`
+        var p = endIdx
+        while (p < endOffset && (buffer[p] == ' ' || buffer[p] == '\t')) p++
+        if (p < endOffset && (buffer[p] == '{' || buffer[p] == '&' || buffer[p] == '^' || buffer[p] == '/')) {
+            return true
+        }
+        return false
     }
 
     private fun isNumberLiteral(s: String): Boolean {
@@ -597,6 +668,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
     companion object {
         val COMMENT = createTextAttributesKey("RN_COMMENT", DefaultLanguageHighlighterColors.LINE_COMMENT)
         val KEY = createTextAttributesKey("RN_KEY", DefaultLanguageHighlighterColors.INSTANCE_FIELD)
+        val TAG = createTextAttributesKey("RN_TAG", DefaultLanguageHighlighterColors.MARKUP_TAG)
         val SCHEMA_PORTAL = createTextAttributesKey("RN_SCHEMA_PORTAL", DefaultLanguageHighlighterColors.CLASS_NAME)
         val SCHEMA_TYPE = createTextAttributesKey("RN_SCHEMA_TYPE", DefaultLanguageHighlighterColors.CLASS_REFERENCE)
         val SYMBOL = createTextAttributesKey("RN_SYMBOL", DefaultLanguageHighlighterColors.CONSTANT)
@@ -617,6 +689,7 @@ class RnSyntaxHighlighter : SyntaxHighlighterBase() {
         when (tokenType) {
             RnTypes.COMMENT -> pack(COMMENT)
             RnTypes.KEY -> pack(KEY)
+            RnTypes.TAG -> pack(TAG)
             RnTypes.SCHEMA_PORTAL -> pack(SCHEMA_PORTAL)
             RnTypes.SCHEMA_TYPE -> pack(SCHEMA_TYPE)
             RnTypes.SYMBOL -> pack(SYMBOL)
@@ -647,44 +720,163 @@ class RnCommenter : Commenter {
 }
 
 /**
- * Topological Folding Builder for `.rn` v0.3.0 blocks (`{`, `(`, `[`, `#` at end of line).
+ * Topological & Structural Folding Builder for `.rn` v1.0.0:
+ * 1. Pentad Block Folding (`{`, `(`, `[`, `#` at EOL) — handles both `+Q` indentation and Column-0 raw blocks inside `{`/`[`
+ * 2. Column-0 Raw Multiline Strings (`(Type)?(N)?"` ... `"(N)?`) — folds even when inner lines start at Column 0!
+ * 3. Multi-line Explicit Bracket Blocks (`{ ... }`, `[ ... ]`, `( ... )`) — folds across wrapped lines regardless of space indent
+ * 4. Markdown Structural Heading Group Folding (`title` > `part` > `section` > `topic`) — folds entire document sections
+ *    until the next heading of equal or higher rank!
  */
 class RnFoldingBuilder : FoldingBuilderEx() {
     override fun buildFoldRegions(root: PsiElement, document: Document, quick: Boolean): Array<FoldingDescriptor> {
         val descriptors = mutableListOf<FoldingDescriptor>()
+        val addedRanges = mutableSetOf<TextRange>()
+        val text = document.charsSequence
         val lineCount = document.lineCount
-        for (line in 0 until lineCount) {
-            val startOffset = document.getLineStartOffset(line)
-            val endOffset = document.getLineEndOffset(line)
-            val lineText = document.getText(TextRange(startOffset, endOffset))
-            val trimmed = lineText.trim()
-            if (trimmed.isEmpty()) continue
-            // Inline comment `# ...` is single-line, whereas bare `#` at EOL is a foldable block comment
-            if (trimmed.startsWith("#") && trimmed != "#") continue
+        val lines = List(lineCount) { line ->
+            val s = document.getLineStartOffset(line)
+            val e = document.getLineEndOffset(line)
+            text.subSequence(s, e).toString()
+        }
 
-            val indent = lineText.takeWhile { it == ' ' || it == '\t' }.length
-            if (trimmed.endsWith("{") || trimmed.endsWith("(") || trimmed.endsWith("[") || trimmed == "#") {
-                var lastChildLine = line
-                for (sub in (line + 1) until lineCount) {
-                    val subStart = document.getLineStartOffset(sub)
-                    val subEnd = document.getLineEndOffset(sub)
-                    val subText = document.getText(TextRange(subStart, subEnd))
-                    if (subText.isBlank()) continue
-                    val subIndent = subText.takeWhile { it == ' ' || it == '\t' }.length
-                    if (subIndent > indent) {
-                        lastChildLine = sub
-                    } else {
-                        break
-                    }
-                }
-                if (lastChildLine > line) {
-                    val foldEnd = document.getLineEndOffset(lastChildLine)
-                    if (foldEnd > endOffset) {
-                        descriptors.add(FoldingDescriptor(root.node, TextRange(endOffset - 1, foldEnd)))
-                    }
+        fun addFold(startOffset: Int, endOffset: Int, placeholder: String = "...") {
+            if (endOffset > startOffset + 1 && endOffset <= document.textLength) {
+                val range = TextRange(startOffset, endOffset)
+                if (addedRanges.add(range)) {
+                    descriptors.add(object : FoldingDescriptor(root.node, range) {
+                        override fun getPlaceholderText(): String = placeholder
+                    })
                 }
             }
         }
+
+        // 1. Markdown Heading Hierarchy Group Folding (`title` = 1, `part` = 2, `section` = 3, `topic` = 4)
+        data class HeadingEntry(val line: Int, val level: Int, val indent: Int, val titleText: String)
+        val headings = mutableListOf<HeadingEntry>()
+
+        var lineIdx = 0
+        while (lineIdx < lineCount) {
+            val rawLine = lines[lineIdx]
+            val trimmedRight = rawLine.trimEnd('\r', ' ', '\t')
+            val col0Rank = RnGrammarParser.detectCol0RawOpenerRank(trimmedRight)
+            if (col0Rank != null) {
+                val closeMarker = "\"$col0Rank"
+                val openEndOffset = document.getLineEndOffset(lineIdx)
+                lineIdx++
+                while (lineIdx < lineCount) {
+                    if (lines[lineIdx].trimEnd('\r', ' ', '\t') == closeMarker) {
+                        val closeEndOffset = document.getLineEndOffset(lineIdx)
+                        addFold(openEndOffset, closeEndOffset, "...\"$col0Rank")
+                        break
+                    }
+                    lineIdx++
+                }
+                lineIdx++
+                continue
+            }
+
+            val trimmed = trimmedRight.trim()
+            val indent = RnGrammarParser.getIndent(rawLine)
+            val firstWord = trimmed.takeWhile { !it.isWhitespace() && it != '[' && it != '{' && it != '(' }
+            val headingLevel = when (firstWord) {
+                "title", "h1" -> 1
+                "part", "subtitle", "h2" -> 2
+                "section", "h3" -> 3
+                "topic", "h4" -> 4
+                else -> 0
+            }
+            if (headingLevel > 0 && (trimmed.length == firstWord.length || trimmed[firstWord.length].isWhitespace())) {
+                headings.add(HeadingEntry(lineIdx, headingLevel, indent, trimmed))
+            }
+            lineIdx++
+        }
+
+        for (hIdx in headings.indices) {
+            val current = headings[hIdx]
+            var endLine = lineCount - 1
+            for (nextIdx in (hIdx + 1) until headings.size) {
+                val next = headings[nextIdx]
+                if (next.level <= current.level && next.indent <= current.indent) {
+                    endLine = next.line - 1
+                    break
+                }
+            }
+            while (endLine > current.line && lines[endLine].isBlank()) {
+                endLine--
+            }
+            if (endLine > current.line) {
+                val foldStart = document.getLineEndOffset(current.line)
+                val foldEnd = document.getLineEndOffset(endLine)
+                addFold(foldStart, foldEnd, " ...")
+            }
+        }
+
+        // 2. Pentad Block Folding (`{`, `(`, `[`, `#` at EOL), aware of nested Col-0 strings
+        for (line in 0 until lineCount) {
+            val rawLine = lines[line]
+            val trimmedRight = RnGrammarParser.stripInlineComment(rawLine.trimEnd('\r', ' ', '\t')).trimEnd()
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.startsWith("#") && trimmed != "#") continue
+
+            val indent = RnGrammarParser.getIndent(rawLine)
+            if (trimmedRight.endsWith("{") || trimmedRight.endsWith("(") || trimmedRight.endsWith("[") || trimmed == "#") {
+                val lastChildLine = RnGrammarParser.findBlockEnd(lines, line, indent)
+                if (lastChildLine > line) {
+                    val endOffset = document.getLineEndOffset(line)
+                    val foldEnd = document.getLineEndOffset(lastChildLine)
+                    val openerChar = if (trimmed == "#") "#" else trimmedRight.last().toString()
+                    addFold(endOffset - 1, foldEnd, "$openerChar...")
+                }
+            }
+        }
+
+        // 3. Explicit Bracket Folding (`[ ... ]`, `{ ... }`, `( ... )`) when wrapped across multiple lines without indent
+        data class OpenBracket(val ch: Char, val offset: Int, val line: Int)
+        val bracketStack = ArrayDeque<OpenBracket>()
+        var inQuotes = false
+        var inBackticks = false
+        var offset = 0
+        val totalLen = text.length
+        while (offset < totalLen) {
+            val ch = text[offset]
+            if (inQuotes) {
+                if (ch == '\\' && offset + 1 < totalLen) {
+                    offset += 2
+                    continue
+                }
+                if (ch == '"') inQuotes = false
+                offset++
+                continue
+            }
+            if (inBackticks) {
+                if (ch == '`') inBackticks = false
+                offset++
+                continue
+            }
+            when (ch) {
+                '"' -> inQuotes = true
+                '`' -> inBackticks = true
+                '[', '{', '(' -> bracketStack.addLast(OpenBracket(ch, offset, document.getLineNumber(offset)))
+                ']', '}', ')' -> {
+                    if (bracketStack.isNotEmpty()) {
+                        val last = bracketStack.last()
+                        val matches = (last.ch == '[' && ch == ']') ||
+                                (last.ch == '{' && ch == '}') ||
+                                (last.ch == '(' && ch == ')')
+                        if (matches) {
+                            bracketStack.removeLast()
+                            val closeLine = document.getLineNumber(offset)
+                            if (closeLine > last.line) {
+                                addFold(last.offset, offset + 1, "${last.ch}...$ch")
+                            }
+                        }
+                    }
+                }
+            }
+            offset++
+        }
+
         return descriptors.toTypedArray()
     }
 
@@ -768,9 +960,10 @@ object RnTableFormatter {
         if (firstChildIdx == -1) return
 
         val rowIndentLen = getIndentLength(lines[firstChildIdx])
-        val firstRowCells = splitTopLevelRow(lines[firstChildIdx]) ?: return
+        val headerSplit = RnGrammarParser.splitTableRow(lines[firstChildIdx], expectedCols = -1)
         // A 2D table in .rn must have at least one top-level comma on the header line
-        if (firstRowCells.cells.size < 2) return
+        if (headerSplit.first.size < 2) return
+        val expectedHeaderCols = headerSplit.first.size
 
         // Collect all direct child rows at `rowIndentLen` that contain top-level commas
         data class ParsedRow(
@@ -790,15 +983,15 @@ object RnTableFormatter {
             val trimmed = rawLine.trim()
             if (trimmed.startsWith("#")) continue
 
-            val split = splitTopLevelRow(rawLine) ?: continue
-            if (split.cells.size < 2) continue
+            val split = RnGrammarParser.splitTableRow(rawLine, expectedCols = expectedHeaderCols)
+            if (split.first.size < 2) continue
 
             parsedRows.add(
                 ParsedRow(
                     lineIndex = idx,
                     indentStr = rawLine.substring(0, indent),
-                    cells = split.cells,
-                    trailingComment = split.trailingComment
+                    cells = split.first,
+                    trailingComment = split.second
                 )
             )
         }
@@ -1038,7 +1231,8 @@ class RnFormattingService : AsyncDocumentFormattingService() {
 class RnColorSettingsPage : ColorSettingsPage {
     private val descriptors = arrayOf(
         AttributesDescriptor("Comment (# )", RnSyntaxHighlighter.COMMENT),
-        AttributesDescriptor("Key / Tag Name", RnSyntaxHighlighter.KEY),
+        AttributesDescriptor("Key Name", RnSyntaxHighlighter.KEY),
+        AttributesDescriptor("Markup / Stream Tag (b[...], a(...)[...], ul [)", RnSyntaxHighlighter.TAG),
         AttributesDescriptor("Attached Type Constructor (Sql(, Html[, Scss{)", RnSyntaxHighlighter.SCHEMA_PORTAL),
         AttributesDescriptor("Schema Type Definition (Uuid, Int, Str)", RnSyntaxHighlighter.SCHEMA_TYPE),
         AttributesDescriptor("Symbol ('pk, 'GET)", RnSyntaxHighlighter.SYMBOL),

@@ -3,6 +3,7 @@ package org.razomy.rn.jetbrains.intellij.ide.plugin
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -61,6 +62,16 @@ class MyToolWindowFactory : ToolWindowFactory {
                     }
                 })
             }
+
+            val autoExportToggle = JBCheckBox(
+                "Auto-export on Save (*.md.rn -> .md, *.json.rn -> .json)",
+                RnSettingsState.getInstance().state.autoExportOnSave
+            ).apply {
+                addActionListener {
+                    RnSettingsState.getInstance().state.autoExportOnSave = isSelected
+                }
+            }
+            buttonsPanel.add(autoExportToggle)
 
             topPanel.add(buttonsPanel, BorderLayout.CENTER)
             topPanel.add(statusLabel, BorderLayout.SOUTH)
